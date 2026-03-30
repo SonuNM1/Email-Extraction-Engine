@@ -1,10 +1,10 @@
-import express from "express";
-import { runScraper } from "../controllers/scraper.controller.js";
+import { Router } from 'express';
+import { startScrape, getStatus, exportCsv } from '../controllers/scraper.controller.js';
 
-const router = express.Router()
+const router = Router();
 
-// POST /api/scraper/run
+router.post('/', startScrape);
+router.get('/:jobId/status', getStatus);
+router.get('/:jobId/export', exportCsv);
 
-router.post("/run", runScraper) ; 
-
-export default router ; 
+export default router;

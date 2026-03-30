@@ -1,68 +1,93 @@
-import { chromium } from "playwright";
-import { cleanEmails } from "../utils/cleanEmails.js";
-import { safeGoto } from "../utils/safeGoto.js";
+import axios from 'axios';
+import * as cheerio from 'cheerio';
+import pLimit from 'p-limit';
+import { chromium } from 'playwright';
 
-// extracting emails from a list of URLs
+const EMAIL_RE = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
+const CONTACT_PATHS = ['/contact', '/contact-us', '/about', '/about-us'];
+const CONCURRENCY = 12;
+const AXIOS_TIMEOUT = 8000;
+const PW_TIMEOUT = 15000;
 
-export const extractEmailsFromUrls = async (urls) => {
+function extractEmails(html) {
+  const found = html.match(EMAIL_RE) || [];
+  return found
+    .map(e => e.toLowerCase().trim())
+    .filter(e => !e.endsWith('.png') && !e.endsWith('.jpg') && !e.includes('example.com'));
+}
+
+async function fetchWithAxios(url) {
+  const { data } = await axios.get(url, {
+    timeout: AXIOS_TIMEOUT,
+    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1)' },
+    maxRedirects: 5,
+  });
+  return typeof data === 'string' ? data : '';
+}
+
+async function fetchWithPlaywright(url) {
   const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext();
+  try {
+    const page = await browser.newPage();
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: PW_TIMEOUT });
+    return await page.content();
+  } finally {
+    await browser.close();
+  }
+}
 
-  let allEmails = [];
+async function getEmailsFromUrl(url) {
+  const emails = new Set();
 
-  for (const url of urls) {
-    const page = await context.newPage();
-
+  const tryFetch = async (targetUrl) => {
+    let html = '';
     try {
-      console.log(`Visiting: ${url}`);
-
-      const loaded = await safeGoto(page, url) ;
-
-      if(!loaded) {
-        await page.close() ; 
-        continue ; 
+      html = await fetchWithAxios(targetUrl);
+    } catch {
+      try {
+        html = await fetchWithPlaywright(targetUrl);
+      } catch {
+        return; // both failed — skip
       }
-
-      // STEP 1: extract mailto emails
-
-      const mailtoEmails = await page.$$eval("a[href^='mailto:']", (elements) =>
-        elements.map((el) => el.href.replace("mailto:", "").trim()),
-      );
-
-      // STEP 2: extract emails from page content (regex)
-
-      const content = await page.content();
-
-      const regexEmails =
-        content.match(
-          /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.(com|org|net|edu|co|in)\b/gi,
-        ) || [];
-
-      // combine both
-
-      const emails = [...mailtoEmails, ...regexEmails];
-
-      const cleaned = cleanEmails(emails);
-
-      allEmails.push(...cleaned);
-
-      if (cleaned.length === 0) {
-        console.log(`🚧 No email found on: ${url}`);
-      } else {
-        console.log(`💕 Found ${emails.length} emails on: ${url}`);
-      }
-
-    } catch (error) {
-      console.log(`Failed on ${url}`);
-      console.log(`Reason: ${error.message}`);
     }
+    extractEmails(html).forEach(e => emails.add(e));
+  };
 
-    await page.close();
+  // Main page
+  await tryFetch(url);
+
+  // Contact/about pages (only if main page had no emails)
+  if (emails.size === 0) {
+    const base = new URL(url).origin;
+    for (const path of CONTACT_PATHS) {
+      await tryFetch(base + path);
+      if (emails.size > 0) break;
+    }
   }
 
-  await browser.close();
+  return [...emails];
+}
 
-  // remove duplicates
+export async function extractEmailsFromUrls(urls, keyword, location) {
+  const limit = pLimit(CONCURRENCY);
+  const results = [];
 
-  return allEmails ; 
-};
+  await Promise.all(
+    urls.map(url =>
+      limit(async () => {
+        const emails = await getEmailsFromUrl(url);
+        emails.forEach(email => {
+          results.push({ email, website: url, location, keyword });
+        });
+      })
+    )
+  );
+
+  // Deduplicate by email address
+  const seen = new Set();
+  return results.filter(r => {
+    if (seen.has(r.email)) return false;
+    seen.add(r.email);
+    return true;
+  });
+}

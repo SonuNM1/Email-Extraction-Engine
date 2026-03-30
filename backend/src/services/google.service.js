@@ -1,22 +1,70 @@
-import {chromium} from "playwright"
+import axios from "axios"
 
-// extract only valid result links from current page 
+const SERPER_KEY = process.env.SERPER_API_KEY ; 
+const SERPER_URL = "https://google.serper.dev/search" ; 
+const PAGES = 10 ; // 10 pages x 10 results = 100 URLs per location 
 
+export async function searchLocation(keyword, location){
+
+  const urls = [] ; 
+
+  for(let page = 1 ; page <= PAGES ; page++){
+    try {
+      const {data} = await axios.post(
+        SERPER_URL, 
+        {
+          q: `${keyword} ${location}`, 
+          num: 10, 
+          page, 
+          gl: 'us', 
+          hl: 'en'
+        }, 
+        {
+          headers: { 
+            'X-API-KEY': SERPER_KEY, 
+            'Content-Type': "application/json"
+          }, 
+          timeout: 10000 
+        }
+      )
+
+      const organic = data.organic || [] ; 
+      
+      organic.forEach(r => r.link && urls.push(r.link)) ; 
+
+    } catch (error) {
+      console.error(`Serper error [${location} p${page}]: `, error.message) ; 
+    }
+  }
+  return urls;
+}
+
+/*
 const extractLinks = async (page) => {
     return await page.$$eval("a:has(h3)", (elements) =>
     elements.map((el) => el.href)
   );
 }
 
-// go to next page 
-
 const goToNextPage = async (page) => {
   try {
-    await page.click("#pnnext"); // Google next button
-    await page.waitForSelector("h3"); 
-    return true;
-  } catch (err) {
-    return false; 
+    const nextButton = await page.$("#pnnext") ; 
+
+    if(!nextButton) {
+      console.log("❌ No next button found") ; 
+      return false ; 
+    }
+
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: "domcontentloaded"}), 
+      nextButton.click() 
+    ])
+
+    return true ;
+
+  } catch (error) {
+    console.log("⚠️Pagination failed: ", error.message) ; 
+    return false 
   }
 };
 
@@ -31,7 +79,7 @@ export const search = async (keyword, locations) => {
     let allLinks = []
 
     for(const location of locations) {
-        const query = `${keyword} in ${location}`
+        const query = `${keyword} in ${location} inurl:contact email`
 
         // go to google 
 
@@ -51,7 +99,7 @@ export const search = async (keyword, locations) => {
         const MAX_PAGES = 15
 
         for(let i = 0 ; i < MAX_PAGES ; i++){
-          
+
             console.log(`Scraping page ${i + 1} for ${query}`);
 
             // extract links 
@@ -76,3 +124,5 @@ export const search = async (keyword, locations) => {
 
     return [...new Set(allLinks)] ; // final dedupe  
 }
+*/
+
