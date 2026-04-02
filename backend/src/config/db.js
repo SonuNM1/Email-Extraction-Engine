@@ -1,6 +1,6 @@
 import dns from "dns";
-import mongoose from "mongoose"
-import chalk from "chalk" ; 
+import mongoose from "mongoose";
+import chalk from "chalk";
 
 export const connectDB = async () => {
   try {
@@ -8,11 +8,17 @@ export const connectDB = async () => {
 
     console.log(chalk.bold.yellow("Connecting to DB..."));
 
-    await mongoose.connect(process.env.MONGODB_URI);
+    const uri = process.env.MONGO_URI;
+
+    if (!uri) {
+      throw new Error("MONGO_URI is missing in .env");
+    }
+
+    await mongoose.connect(uri);
 
     console.log(chalk.bold.green("Database Connected ✅"));
   } catch (error) {
-    console.error(chalk.bold.red("DB Connection error: ", error));
+    console.error(chalk.bold.red("DB Connection error:", error.message));
     process.exit(1);
   }
 };

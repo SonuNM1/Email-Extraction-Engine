@@ -1,23 +1,25 @@
-import type { Job } from "../types/job.types";
+const API = import.meta.env.VITE_API_URL ?? 'http://localhost:5000';
 
-const BASE = import.meta.env.VITE_API_URL || "http://localhost:5000" ; 
-
-export async function startScrape(keyword: string): Promise<{ jobId: string }> {
-  const res = await fetch(`${BASE}/api/scrape`, {
+export async function startScrape(
+  keyword: string,
+  email?: string | null,
+  pushSubscription?: PushSubscription | null
+) {
+  const res = await fetch(`${API}/api/scrape`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ keyword }),
+    body: JSON.stringify({ keyword, email, pushSubscription }),
   });
-  if (!res.ok) throw new Error('Failed to start scrape');
   return res.json();
 }
 
-export async function fetchJobStatus(jobId: string): Promise<Job> {
-  const res = await fetch(`${BASE}/api/scrape/${jobId}/status`);
-  if (!res.ok) throw new Error('Failed to fetch status');
+export async function fetchJobStatus(jobId: string) {
+  const res = await fetch(`${API}/api/scrape/${jobId}/status`);
   return res.json();
 }
+
+// Returns the CSV download URL for a completed job
 
 export function getExportUrl(jobId: string): string {
-  return `${BASE}/api/scrape/${jobId}/export`;
+  return `${API}/api/scrape/${jobId}/export`;
 }

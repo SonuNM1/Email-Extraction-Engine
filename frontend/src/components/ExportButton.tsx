@@ -2,21 +2,21 @@ import { getExportUrl } from '../api/scraper.api';
 
 export function ExportButton({ jobId }: { jobId: string }) {
   return (
-      <a
+    <a
       href={getExportUrl(jobId)}
       download
       style={{
-        display: 'inline-block',
-        padding: '10px 24px',
-        background: '#6366f1',
-        color: '#fff',
-        borderRadius: 8,
-        textDecoration: 'none',
-        fontWeight: 500,
-        fontSize: 15,
+        display: 'inline-flex', alignItems: 'center', gap: 8,
+        padding: '11px 22px', background: 'transparent',
+        border: '1px solid var(--lh-green)', borderRadius: 'var(--r-md)',
+        color: 'var(--lh-green)', fontSize: 13, fontWeight: 700,
+        fontFamily: 'var(--font-mono)', letterSpacing: '0.06em',
+        textDecoration: 'none', transition: 'background 0.2s',
       }}
+      onMouseEnter={e => ((e.currentTarget as HTMLElement).style.background = 'var(--lh-green-dim)')}
+      onMouseLeave={e => ((e.currentTarget as HTMLElement).style.background = 'transparent')}
     >
-      Download CSV
+      ↓ DOWNLOAD CSV
     </a>
   );
 }
