@@ -28,7 +28,7 @@
     "mongoose": "^9.3.3",
     "nodemailer": "^8.0.4",
     "p-limit": "^7.3.0",
-    "playwright": "^1.58.2",
+    "playwright": "^1.59.1",
     "web-push": "^3.6.7"
   },
   "devDependencies": {
