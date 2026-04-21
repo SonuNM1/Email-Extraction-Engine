@@ -1,195 +1,200 @@
 import Job from "../models/job.model.js";
-import { searchLocation } from "../services/google/search.service.js";
+import {
+  searchLocation,
+  serperCredits,
+} from "../services/google/search.service.js";
 import { searchMapsLocation } from "../services/google/maps.service.js";
 import { extractEmailsFromUrls } from "../services/extractor/emailExtractor.js";
 import { extractEmailsFromMapsResults } from "../services/extractor/mapsEmailExtractor.js";
-import { getBrowser, closeBrowser } from "../services/extractor/fetch.service.js";
-import { LOCATIONS } from "../config/locations.js";
 import { createObjectCsvStringifier } from "csv-writer";
-import { sendJobCompleteEmail } from "../services/mailer.service.js";
-import webpush from "web-push";
 import { createWorkbook, finalizeWorkbook } from "../services/excel.service.js";
 import { getBus, destroyBus, logToJob } from "../services/logBus.js";
+import fs from "fs";
+import path from "path";
 
-const LOCATION_CONCURRENCY = 3; // reduced slightly — maps adds more load per location
+const stopRequested = new Set();
 
 export async function startScrape(req, res) {
-  const { keyword, email, pushSubscription } = req.body;
+  const { keyword, location, serperKey } = req.body;
   if (!keyword) return res.status(400).json({ error: "keyword is required" });
+  if (!location) return res.status(400).json({ error: "location is required" });
+
+  const apiKey = serperKey?.trim() || process.env.SERPER_API_KEY;
+  if (!apiKey)
+    return res.status(400).json({ error: "No Serper API key provided" });
 
   const job = await Job.create({
     keyword,
-    notifyEmail: email || null,
-    pushSubscription: pushSubscription || null,
+    location,
     status: "pending",
-    progress: { completed: 0, total: LOCATIONS.length, currentLocation: "" },
-    locations: LOCATIONS.map((name) => ({
-      name,
-      status: "pending",
-      emailsFound: 0,
-      mapsEmailsFound: 0, // track maps separately
-    })),
     emails: [],
+    emailsFound: 0,
+    serperCreditsUsed: 0,
     startedAt: new Date(),
   });
 
   res.json({ jobId: job._id, message: "Scrape started" });
 
-  runScrapeJob(job._id, keyword).catch((err) => {
+  runScrapeJob(job._id, keyword, location, apiKey).catch((err) => {
     console.error("Scrape job crashed:", err);
     Job.findByIdAndUpdate(job._id, { status: "failed" }).exec();
   });
 }
 
-async function runScrapeJob(jobId, keyword) {
-  await Job.findByIdAndUpdate(jobId, { status: "running" });
-  logToJob(jobId, `🚀 Job started for keyword: "${keyword}"`);
-
-  const { workbook, sheet, filePath } = createWorkbook(keyword);
-  logToJob(jobId, `📁 Excel file created: ${filePath}`);
-
-  const browser = await getBrowser();
-  logToJob(jobId, `🌐 Browser initialized`);
-
-  const job = await Job.findById(jobId);
-  const locations = job.locations.filter((l) => l.status === "pending");
-  const globalSeenEmails = new Set();
-
-  for (let i = 0; i < locations.length; i += LOCATION_CONCURRENCY) {
-    const batch = locations.slice(i, i + LOCATION_CONCURRENCY);
-    logToJob(jobId, `\n📦 Processing batch ${Math.floor(i/LOCATION_CONCURRENCY)+1}: ${batch.map(l=>l.name).join(", ")}`);
-
-    await Promise.all(
-      batch.map((locEntry) =>
-        processLocation(jobId, keyword, locEntry.name, sheet, globalSeenEmails, browser)
-      )
-    );
-  }
-
-  await finalizeWorkbook(workbook);
-  await closeBrowser();
-  logToJob(jobId, `✅ Excel finalized at: ${filePath}`);
-
-  const finalJob = await Job.findByIdAndUpdate(
-    jobId,
-    { status: "completed", completedAt: new Date() },
-    { returnDocument: "after" }
-  );
-
-  // Count maps vs search emails
-  const mapsEmails = finalJob.emails.filter(e => e.source === "google_maps").length;
-  const searchEmails = finalJob.emails.length - mapsEmails;
-
-  logToJob(jobId, `\n🎉 Job complete!`);
-  logToJob(jobId, `📊 Total emails: ${finalJob.emails.length}`);
-  logToJob(jobId, `   🗺️  From Google Maps: ${mapsEmails}`);
-  logToJob(jobId, `   🔍 From Google Search: ${searchEmails}`);
-
-  destroyBus(jobId);
-
-  if (finalJob.notifyEmail) {
-    await sendJobCompleteEmail(finalJob.notifyEmail, jobId, keyword, finalJob.emails.length)
-      .catch((err) => console.error("Email failed:", err.message));
-  }
-
-  if (finalJob.pushSubscription) {
-    await webpush
-      .sendNotification(
-        finalJob.pushSubscription,
-        JSON.stringify({
-          title: "Scrape Complete!",
-          body: `Found ${finalJob.emails.length} emails (${mapsEmails} from Maps) for "${keyword}".`,
-          url: `${process.env.FRONTEND_URL}?jobId=${jobId}`,
-        })
-      )
-      .catch((err) => console.error("Push failed:", err.message));
-  }
+export async function stopScrape(req, res) {
+  const { jobId } = req.params;
+  const job = await Job.findById(jobId, "status");
+  if (!job) return res.status(404).json({ error: "Job not found" });
+  if (job.status !== "running")
+    return res.status(400).json({ error: "Job is not running" });
+  stopRequested.add(jobId.toString());
+  logToJob(jobId, `⏹️  Stop requested...`);
+  res.json({ message: "Stop signal sent" });
 }
 
-async function processLocation(jobId, keyword, location, sheet, globalSeenEmails, browser) {
-  await Job.updateOne(
-    { _id: jobId, "locations.name": location },
-    { $set: { "locations.$.status": "running", "progress.currentLocation": location } }
-  );
+async function runScrapeJob(jobId, keyword, location, apiKey) {
+  serperCredits.used = 0;
+  serperCredits.exhausted = false;
+  stopRequested.delete(jobId.toString());
 
-  logToJob(jobId, `\n${"─".repeat(50)}`);
-  logToJob(jobId, `📍 Starting: ${location}`);
+  await Job.findByIdAndUpdate(jobId, { status: "running" });
+  logToJob(jobId, `🚀 Job started — "${keyword}" in ${location}`);
 
-  let searchResults = [];
-  let mapsResults = [];
+  const { workbook, sheet, filePath } = createWorkbook(keyword, location);
+  await Job.findByIdAndUpdate(jobId, { filePath });
+  logToJob(jobId, `📁 File: ${filePath}`);
+
+  const globalSeenEmails = new Set();
+  let wasStopped = false;
 
   try {
-    // ── Step 1: Google Search ──────────────────────────────
-    logToJob(jobId, `🔍 [${location}] Running Google Search...`);
-    const searchUrls = await searchLocation(keyword, location);
-    logToJob(jobId, `🔍 [${location}] Search found ${searchUrls.length} domains`);
+    if (stopRequested.has(jobId.toString())) {
+      wasStopped = true;
+    } else {
+      const [searchUrls, mapsListings] = await Promise.all([
+        searchLocation(keyword, location, apiKey),
+        searchMapsLocation(keyword, location, apiKey),
+      ]);
 
-    searchResults = await extractEmailsFromUrls(
-      searchUrls, keyword, location, jobId, sheet, globalSeenEmails, browser
-    );
-    logToJob(jobId, `🔍 [${location}] Search extracted: ${searchResults.length} emails`);
+      logToJob(
+        jobId,
+        `🔍 ${searchUrls.length} domains | 🗺️ ${mapsListings.length} maps listings`,
+      );
 
-    // ── Step 2: Google Maps ────────────────────────────────
-    logToJob(jobId, `🗺️  [${location}] Running Google Maps search...`);
-    const mapsListings = await searchMapsLocation(keyword, location);
-    logToJob(jobId, `🗺️  [${location}] Maps found ${mapsListings.length} business listings`);
-
-    mapsResults = await extractEmailsFromMapsResults(
-      mapsListings, keyword, location, jobId, sheet, globalSeenEmails, browser
-    );
-    logToJob(jobId, `🗺️  [${location}] Maps extracted: ${mapsResults.length} emails`);
-
-    // ── Step 3: Save everything to DB ─────────────────────
-    const allResults = [...searchResults, ...mapsResults];
-    const emailDocs = allResults.map(({ email, website, source, businessName, phone, address }) => ({
-      email,
-      website,
-      location,
-      keyword,
-      source: source || "google_search",
-      businessName: businessName || "",
-      phone: phone || "",
-      address: address || "",
-    }));
-
-    await Job.updateOne(
-      { _id: jobId, "locations.name": location },
-      {
-        $set: {
-          "locations.$.status": "done",
-          "locations.$.emailsFound": searchResults.length,
-          "locations.$.mapsEmailsFound": mapsResults.length,
-        },
-        $push: { emails: { $each: emailDocs } },
-        $inc: { "progress.completed": 1 },
+      if (!stopRequested.has(jobId.toString())) {
+        const mapsSeenEmails = new Set(); // ← separate set, Maps runs independently
+        await Promise.all([
+          extractEmailsFromUrls(
+            searchUrls,
+            keyword,
+            location,
+            jobId,
+            sheet,
+            globalSeenEmails,
+          ),
+          extractEmailsFromMapsResults(
+            mapsListings,
+            keyword,
+            location,
+            jobId,
+            sheet,
+            mapsSeenEmails,
+          ),
+        ]);
+      } else {
+        wasStopped = true;
       }
-    );
-
-    logToJob(jobId, `✅ [${location}] DONE — Search: ${searchResults.length} | Maps: ${mapsResults.length} | Total: ${allResults.length}`);
-
+    }
   } catch (err) {
-    console.error(`Failed ${location}:`, err.message);
-    logToJob(jobId, `❌ [${location}] failed: ${err.message}`);
-    await Job.updateOne(
-      { _id: jobId, "locations.name": location },
-      { $set: { "locations.$.status": "failed" }, $inc: { "progress.completed": 1 } }
-    );
+    logToJob(jobId, `❌ Error: ${err.message}`);
   }
+
+  // Always finalize Excel — this is what makes the file valid
+  try {
+    await finalizeWorkbook(workbook);
+    logToJob(jobId, `✅ Excel saved: ${filePath}`);
+  } catch (err) {
+    logToJob(jobId, `⚠️ Excel finalize error: ${err.message}`);
+  }
+
+  const finalStatus = wasStopped ? "stopped" : "completed";
+  const finalJob = await Job.findByIdAndUpdate(
+    jobId,
+    {
+      status: finalStatus,
+      completedAt: new Date(),
+      stoppedAt: wasStopped ? new Date() : null,
+      serperCreditsUsed: serperCredits.used,
+      creditsExhausted: serperCredits.exhausted,
+    },
+    { returnDocument: "after" },
+  );
+
+  stopRequested.delete(jobId.toString());
+
+  logToJob(
+    jobId,
+    `\n🎉 ${finalStatus}! Emails: ${finalJob.emails.length} | Credits: ${serperCredits.used}`,
+  );
+  destroyBus(jobId);
 }
 
 export async function getStatus(req, res) {
-  const job = await Job.findById(req.params.jobId, "status progress locations keyword emails");
+  const job = await Job.findById(
+    req.params.jobId,
+    "status keyword location emails emailsFound serperCreditsUsed filePath creditsExhausted stoppedAt startedAt completedAt",
+  );
   if (!job) return res.status(404).json({ error: "Job not found" });
 
-  const mapsCount = job.emails.filter(e => e.source === "google_maps").length;
-  const searchCount = job.emails.length - mapsCount;
-
+  const isTerminal = ["completed", "stopped", "failed"].includes(job.status);
   res.json({
     ...job.toObject(),
-    totalEmailsFound: job.emails.length,
-    mapsEmailsFound: mapsCount,
-    searchEmailsFound: searchCount,
+    totalEmailsFound: isTerminal ? job.emails.length : job.emailsFound,
+    serperCreditsUsed: job.serperCreditsUsed ?? 0,
   });
+}
+
+export async function downloadExcel(req, res) {
+  const job = await Job.findById(
+    req.params.jobId,
+    "filePath keyword location status emails",
+  );
+  if (!job) return res.status(404).json({ error: "Job not found" });
+
+  // If file missing or job was interrupted, rebuild from MongoDB
+  let filePath = job.filePath;
+  if (!filePath || !fs.existsSync(filePath)) {
+    if (!job.emails?.length)
+      return res.status(404).json({ error: "No data found" });
+    const ExcelJS = (await import("exceljs")).default;
+    const EXCEL_DIR = path.join(process.cwd(), "excel");
+    const safeKw = job.keyword.toLowerCase().replace(/[^a-z0-9]/g, "_");
+    const safeLoc = (job.location || "unknown")
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "_");
+    filePath = path.join(EXCEL_DIR, `${safeKw}_${safeLoc}_recovered.xlsx`);
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Leads");
+    ws.columns = [
+      { header: "Email", key: "email", width: 35 },
+      { header: "Website", key: "website", width: 30 },
+      { header: "Business Name", key: "businessName", width: 30 },
+      { header: "Phone", key: "phone", width: 18 },
+      { header: "Source", key: "source", width: 16 },
+    ];
+    ws.getRow(1).font = { bold: true };
+    for (const e of job.emails) ws.addRow(e);
+    await wb.xlsx.writeFile(filePath);
+    await Job.findByIdAndUpdate(job._id, { filePath });
+  }
+
+  const filename = path.basename(filePath);
+  res.setHeader(
+    "Content-Type",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  );
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  fs.createReadStream(filePath).pipe(res);
 }
 
 export async function exportCsv(req, res) {
@@ -197,21 +202,21 @@ export async function exportCsv(req, res) {
   if (!job) return res.status(404).json({ error: "Job not found" });
 
   res.setHeader("Content-Type", "text/csv");
-  res.setHeader("Content-Disposition", `attachment; filename="${job.keyword}-emails.csv"`);
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="${job.keyword}-emails.csv"`,
+  );
 
   const csvWriter = createObjectCsvStringifier({
     header: [
-      { id: "email",        title: "email" },
-      { id: "website",      title: "website" },
-      { id: "businessName", title: "business_name" },
-      { id: "phone",        title: "phone" },
-      { id: "address",      title: "address" },
-      { id: "location",     title: "location" },
-      { id: "keyword",      title: "keyword" },
-      { id: "source",       title: "source" },
+      { id: "email", title: "Email" },
+      { id: "website", title: "Website" },
+      { id: "businessName", title: "Business Name" },
+      { id: "phone", title: "Phone" },
+      { id: "location", title: "Location" },
+      { id: "source", title: "Source" },
     ],
   });
-
   res.write(csvWriter.getHeaderString());
   res.write(csvWriter.stringifyRecords(job.emails));
   res.end();
@@ -223,8 +228,7 @@ export function streamLogs(req, res) {
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
   res.flushHeaders();
-  res.write(`data: ${JSON.stringify("🔌 Connected to log stream")}\n\n`);
-
+  res.write(`data: ${JSON.stringify("🔌 Connected")}\n\n`);
   const bus = getBus(jobId);
   const onLog = (msg) => res.write(`data: ${JSON.stringify(msg)}\n\n`);
   bus.on("log", onLog);

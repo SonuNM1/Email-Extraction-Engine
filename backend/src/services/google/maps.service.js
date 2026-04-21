@@ -1,99 +1,105 @@
 import "dotenv/config";
 import axios from "axios";
-import { isBlockedUrl, cleanUrl } from "./urlFilter.js";
+import pLimit from "p-limit";
+import { serperCredits } from "./search.service.js";
 
-const SERPER_KEY = process.env.SERPER_API_KEY;
 const SERPER_MAPS_URL = "https://google.serper.dev/maps";
+const GLOBAL_MAPS_LIMIT = pLimit(3);
 
-// Serper maps API — returns Google Maps business listings
-// Each result has: title, address, website, phone, rating etc
-// We extract the website and pass it to email extractor
+// Skip maps for tiny territories — no listings exist there
+const SKIP_MAPS_LOCATIONS = new Set([
+  "American Samoa", "Guam", "Marianas Island", "US Virgin Islands", "Northern Mariana Islands"
+]);
 
-const RESULTS_PER_QUERY = 20; // Serper maps returns up to 20 per call
+const MAPS_QUERY_TEMPLATES = [
+  (kw, loc) => `${kw} in ${loc}`,
+  (kw, loc) => `best ${kw} ${loc}`,
+  (kw, loc) => `${kw} company ${loc}`,
+];
 
-function delay(ms) {
-  return new Promise((res) => setTimeout(res, ms));
+const BLOCKED_DOMAINS = new Set([
+  "linkedin.com","facebook.com","instagram.com","twitter.com","x.com",
+  "yelp.com","yellowpages.com","tripadvisor.com","bbb.org","manta.com",
+  "angi.com","thumbtack.com","homeadvisor.com","houzz.com",
+  "apollo.io","zoominfo.com","crunchbase.com","indeed.com","glassdoor.com",
+]);
+
+function isBlockedUrl(url) {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+    if (/\.(gov|edu|mil|org)$/i.test(host)) return true;
+    const tld = host.split(".").pop();
+    if (tld.length === 2 && !["us","co","io"].includes(tld)) return true;
+    return [...BLOCKED_DOMAINS].some(d => host === d || host.endsWith("." + d));
+  } catch { return true; }
 }
 
-/**
- * Search Google Maps for businesses matching keyword + location
- * Returns array of clean root URLs (deduplicated, filtered)
- *
- * Flow: Serper Maps API → extract website field → filter blocked → dedup → return
- */
-export async function searchMapsLocation(keyword, location) {
+function cleanUrl(url) {
+  try { return new URL(url).origin; } catch { return null; }
+}
+
+export async function searchMapsLocation(keyword, location, apiKey) {
+  if (SKIP_MAPS_LOCATIONS.has(location)) {
+    console.log(`🗺️  [${location}] Skipping maps — territory too small`);
+    return [];
+  }
+  if (serperCredits.exhausted) return [];
+
+  const key = apiKey || process.env.SERPER_API_KEY;
   const seen = new Set();
   const results = [];
-  const query = `${keyword} in ${location}`;
 
-  console.log(`🗺️  [Maps] Searching: "${query}"`);
+  await Promise.all(
+    MAPS_QUERY_TEMPLATES.map(template =>
+      GLOBAL_MAPS_LIMIT(async () => {
+        if (serperCredits.exhausted) return;
+        const query = template(keyword, location);
+        try {
+          const response = await axios.post(
+            SERPER_MAPS_URL,
+            { q: query, gl: "us", hl: "en", num: 20 },
+            {
+              headers: { "X-API-KEY": key, "Content-Type": "application/json" },
+              timeout: 10000,
+              validateStatus: () => true,
+            }
+          );
 
-  try {
-    await delay(200);
+          if (response.status === 400) {
+            if (!serperCredits.exhausted) {
+              serperCredits.exhausted = true;
+              console.error(`\n🚫 [Maps] Credits exhausted at [${location}]`);
+              GLOBAL_MAPS_LIMIT.clearQueue();
+            }
+            return;
+          }
+          if (response.status === 429) {
+            await new Promise(r => setTimeout(r, 4000));
+            return;
+          }
 
-    const { data } = await axios.post(
-      SERPER_MAPS_URL,
-      {
-        q: query,
-        gl: "us",
-        hl: "en",
-        num: RESULTS_PER_QUERY,
-      },
-      {
-        headers: {
-          "X-API-KEY": SERPER_KEY,
-          "Content-Type": "application/json",
-        },
-        timeout: 12000,
-        validateStatus: () => true,
-      }
-    );
+          for (const place of response.data.places || []) {
+            const website = place.website;
+            if (!website || isBlockedUrl(website)) continue;
+            const root = cleanUrl(website);
+            if (!root || seen.has(root)) continue;
+            seen.add(root);
+            results.push({
+              url: root,
+              businessName: place.title || "",
+              address: place.address || "",
+              phone: place.phoneNumber || "",
+              rating: place.rating || null,
+              source: "google_maps",
+            });
+          }
+        } catch (e) {
+          console.error(`[Maps] Failed "${query}":`, e.message);
+        }
+      })
+    )
+  );
 
-    if (data.error) {
-      console.error(`🗺️  [Maps] Serper error:`, data.error);
-      return results;
-    }
-
-    const places = data.places || [];
-    console.log(`🗺️  [Maps] Got ${places.length} map listings for "${query}"`);
-
-    for (const place of places) {
-      // Maps results have website field directly
-      const website = place.website;
-      if (!website) {
-        console.log(`🗺️  [Maps] ⚠️  No website for: ${place.title}`);
-        continue;
-      }
-
-      if (isBlockedUrl(website)) {
-        console.log(`🗺️  [Maps] 🚫 Blocked: ${website} (${place.title})`);
-        continue;
-      }
-
-      const root = cleanUrl(website);
-      if (!root) continue;
-
-      if (seen.has(root)) {
-        console.log(`🗺️  [Maps] 🔁 Duplicate: ${root}`);
-        continue;
-      }
-
-      seen.add(root);
-      results.push({
-        url: root,
-        businessName: place.title || "",
-        address: place.address || "",
-        phone: place.phoneNumber || "",
-        rating: place.rating || null,
-        source: "google_maps",
-      });
-
-      console.log(`🗺️  [Maps] ✅ ${place.title} → ${root}`);
-    }
-  } catch (e) {
-    console.error(`🗺️  [Maps] Request failed:`, e.message);
-  }
-
-  console.log(`🗺️  [Maps] [${location}] Found ${results.length} unique business websites`);
+  console.log(`🗺️  [${location}] ${results.length} map listings`);
   return results;
 }

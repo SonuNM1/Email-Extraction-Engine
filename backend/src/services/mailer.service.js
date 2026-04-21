@@ -1,5 +1,7 @@
 import nodemailer from "nodemailer";
 import { jobCompleteTemplate } from "../templates/jobCompleteTemplate.js";
+import path from "path";
+import fs from "fs";
 
 const transporter = nodemailer.createTransport({
   service: "gmail",
@@ -9,24 +11,31 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-export async function sendJobCompleteEmail(to, jobId, keyword, emailCount) {
+export async function sendJobCompleteEmail(to, jobId, keyword, emailCount, filePath) {
   try {
     const downloadUrl = `${process.env.FRONTEND_URL}/api/scrape/${jobId}/export`;
 
-    const html = jobCompleteTemplate({
-      keyword,
-      emailCount,
-      downloadUrl
-    });
+    const html = jobCompleteTemplate({ keyword, emailCount, downloadUrl });
 
-    await transporter.sendMail({
+    const mailOptions = {
       from: `"Email Scraper" <${process.env.NOTIFY_EMAIL}>`,
       to,
       subject: `✅ Scrape done — ${emailCount} emails found for "${keyword}"`,
       html,
-    });
+    };
 
-    console.log("✅ Email sent");
+    // Attach Excel if file exists
+    if (filePath && fs.existsSync(filePath)) {
+      mailOptions.attachments = [
+        {
+          filename: path.basename(filePath),
+          path: filePath,
+        },
+      ];
+    }
+
+    await transporter.sendMail(mailOptions);
+    console.log("✅ Email sent with attachment");
   } catch (error) {
     console.error("❌ Email failed:", error.message);
   }

@@ -1,0 +1,29 @@
+services:
+  backend:
+    build: ./backend
+    container_name: emailscrape_backend
+    environment:
+      - MONGO_URI=${MONGO_URI}
+      - SERPER_API_KEY=${SERPER_API_KEY}
+      - PORT=${PORT}
+      - FRONTEND_URL=${FRONTEND_URL}
+      - NOTIFY_EMAIL=${NOTIFY_EMAIL}
+      - NOTIFY_EMAIL_PASSWORD=${NOTIFY_EMAIL_PASSWORD}
+    volumes:
+      - excel_data:/app/excel
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        - VITE_API_URL=${VITE_API_URL}
+    container_name: emailscrape_frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  excel_data:

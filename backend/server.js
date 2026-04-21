@@ -1,16 +1,9 @@
 import dotenv from "dotenv";
 dotenv.config(); 
 
-import webpush from 'web-push'
 import app from "./src/app.js";
 import chalk from "chalk";
 import { connectDB } from "./src/config/db.js";
-
-webpush.setVapidDetails(
-  process.env.VAPID_EMAIL,
-  process.env.VAPID_PUBLIC_KEY,
-  process.env.VAPID_PRIVATE_KEY
-);
 
 const PORT = process.env.PORT || 5000;
 

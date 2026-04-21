@@ -1,88 +1,131 @@
-import { useState, useEffect, useRef } from 'react';
-import { startScrape, fetchJobStatus } from '../api/scraper.api';
-import type { Job } from '../types/job.types';
+import { useState, useEffect, useRef, useCallback } from "react";
+import axios from "axios";
+import { toast } from "sonner";
+import type { Job } from "../types/job.types";
 
-const API = import.meta.env.VITE_API_URL;
+const API = import.meta.env.VITE_API_URL || '' ;
 
-export function useScrapeJob() {
-  const [jobId, setJobId]     = useState<string | null>(null);
-  const [job, setJob]         = useState<Job | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState<string | null>(null);
-  const [logs, setLogs]       = useState<string[]>([]);
+export interface JobEntry {
+  jobId: string;
+  keyword: string;
+  location: string;
+  job: Job | null;
+  logs: string[];
+  loading: boolean;
+  error: string | null;
+}
 
-  const intervalRef  = useRef<ReturnType<typeof setInterval> | null>(null);
-  const esRef        = useRef<EventSource | null>(null);
+async function fetchJobStatus(jobId: string) {
+  const res = await axios.get(`${API}/api/scrape/${jobId}/status`);
+  return res.data;
+}
 
-  const stopPolling = () => {
-    if (intervalRef.current) clearInterval(intervalRef.current);
+async function apiStartScrape(keyword: string, location: string, serperKey: string | null) {
+  const res = await axios.post(`${API}/api/scrape`, { keyword, location, serperKey });
+  return res.data;
+}
+
+export function useScrapeJobs() {
+  const [jobs, setJobs] = useState<JobEntry[]>([]);
+  const intervalsRef = useRef<Record<string, ReturnType<typeof setInterval>>>({});
+  const esRef        = useRef<Record<string, EventSource>>({});
+
+  const updateJob = (jobId: string, patch: Partial<JobEntry>) =>
+    setJobs(prev => prev.map(j => j.jobId === jobId ? { ...j, ...patch } : j));
+
+  const stopPolling = (jobId: string) => {
+    clearInterval(intervalsRef.current[jobId]);
+    delete intervalsRef.current[jobId];
   };
 
-  const stopLogs = () => {
-    if (esRef.current) { esRef.current.close(); esRef.current = null; }
+  const stopLogs = (jobId: string) => {
+    esRef.current[jobId]?.close();
+    delete esRef.current[jobId];
   };
 
-  const start = async (
-    keyword: string,
-    email?: string | null,
-    pushSubscription?: PushSubscription | null
-  ) => {
-    setLoading(true);
-    setError(null);
-    setJob(null);
-    setLogs([]);
-    try {
-      const { jobId: id } = await startScrape(keyword, email, pushSubscription);
-      setJobId(id);
-    } catch (e) {
-      setError('Could not start scrape. Is the backend running?');
-      setLoading(false);
-      console.error('start error:', e);
-    }
+  const triggerDownload = (jobId: string, keyword: string) => {
+    const a = document.createElement("a");
+    a.href = `${API}/api/scrape/${jobId}/download`;
+    a.download = `${keyword}-emails.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   };
 
-  // Status polling
-  useEffect(() => {
-    if (!jobId) return;
-
+  const attachPoller = useCallback((jobId: string, keyword: string) => {
     const poll = async () => {
       try {
         const data = await fetchJobStatus(jobId);
-        setJob(data);
-        setLoading(false);
-        if (data.status === 'completed' || data.status === 'failed') {
-          stopPolling();
-          stopLogs();
+        updateJob(jobId, { job: data, loading: false });
+
+        if (data.status === "completed") {
+          stopPolling(jobId); stopLogs(jobId);
+          toast.success(`✅ Done — ${data.totalEmailsFound} emails found`, { id: jobId, duration: 6000 });
+          triggerDownload(jobId, keyword);
         }
-      } catch (e) {
-        setError('Lost connection to backend');
-        stopPolling();
-        stopLogs();
-        console.error('poll error:', e);
+        if (data.status === "stopped") {
+          stopPolling(jobId); stopLogs(jobId);
+          toast.warning(`⏹️ Stopped — ${data.totalEmailsFound} emails saved`, { id: jobId, duration: 6000 });
+          triggerDownload(jobId, keyword);
+        }
+        if (data.status === "failed") {
+          stopPolling(jobId); stopLogs(jobId);
+          toast.error(`❌ Job failed`, { id: jobId });
+        }
+      } catch {
+        updateJob(jobId, { error: "Lost connection" });
+        stopPolling(jobId); stopLogs(jobId);
       }
     };
-
     poll();
-    intervalRef.current = setInterval(poll, 5000);
-    return stopPolling;
-  }, [jobId]);
+    intervalsRef.current[jobId] = setInterval(poll, 5000);
+  }, []);
 
-  // SSE log stream
-  useEffect(() => {
-    if (!jobId) return;
-
+  const attachLogStream = useCallback((jobId: string) => {
     const es = new EventSource(`${API}/api/scrape/${jobId}/logs`);
-    esRef.current = es;
-
-    es.onmessage = (event) => {
+    esRef.current[jobId] = es;
+    es.onmessage = event => {
       const msg = JSON.parse(event.data) as string;
-      setLogs(prev => [...prev.slice(-500), msg]); // keep last 500 lines
+      setJobs(prev => prev.map(j =>
+        j.jobId === jobId ? { ...j, logs: [...j.logs.slice(-500), msg] } : j
+      ));
     };
-
     es.onerror = () => es.close();
+  }, []);
 
-    return stopLogs;
-  }, [jobId]);
+  const start = useCallback(async (keyword: string, location: string, serperKey: string | null) => {
+    const toastId = `start-${Date.now()}`;
+    toast.loading(`Starting...`, { id: toastId });
+    try {
+      const { jobId } = await apiStartScrape(keyword, location, serperKey);
+      const entry: JobEntry = { jobId, keyword, location, job: null, logs: [], loading: true, error: null };
+      setJobs(prev => [entry, ...prev]);
+      toast.success(`🚀 Started for "${keyword}" in ${location}`, { id: toastId, duration: 3000 });
+      attachPoller(jobId, keyword);
+      attachLogStream(jobId);
+      return jobId;
+    } catch {
+      toast.error(`Failed to start`, { id: toastId });
+      return null;
+    }
+  }, [attachPoller, attachLogStream]);
 
-  return { job, loading, error, start, jobId, logs };
+  const stop = useCallback(async (jobId: string) => {
+    try {
+      await axios.post(`${API}/api/scrape/${jobId}/stop`);
+      toast.info("⏹️ Stop signal sent...", { duration: 4000 });
+    } catch { toast.error("Failed to stop"); }
+  }, []);
+
+  const remove = useCallback((jobId: string) => {
+    stopPolling(jobId); stopLogs(jobId);
+    setJobs(prev => prev.filter(j => j.jobId !== jobId));
+  }, []);
+
+  useEffect(() => () => {
+    Object.values(intervalsRef.current).forEach(clearInterval);
+    Object.values(esRef.current).forEach(es => es.close());
+  }, []);
+
+  return { jobs, start, stop, remove };
 }

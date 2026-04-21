@@ -1,36 +1,68 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 
-type ExcelFile = { name: string; url: string };
+type FileEntry = {
+  jobId: string;
+  name: string;
+  keyword: string;
+  status: string;
+  emailCount: number;
+  creditsUsed: number;
+  creditsExhausted: boolean;
+  fileExists: boolean;
+  downloadable: boolean;
+  createdAt: string;
+  completedAt: string | null;
+};
 
 const API = import.meta.env.VITE_API_URL;
 
-function parseDate(filename: string): string {
-  const match = filename.match(/(\d{4}-\d{2}-\d{2})/);
-  return match ? match[1] : "—";
-}
+const STATUS_COLOR: Record<string, string> = {
+  completed: "var(--lh-green)",
+  stopped: "#f59e0b",
+  failed: "var(--lh-danger)",
+  running: "var(--lh-cyan)",
+  pending: "var(--lh-muted)",
+};
 
-function parseKeyword(filename: string): string {
-  return filename.replace(/-\d{4}-\d{2}-\d{2}\.xlsx$/, "").replace(/_/g, " ");
+const STATUS_LABEL: Record<string, string> = {
+  completed: "✅ Complete",
+  stopped: "⚠️ Stopped",
+  failed: "❌ Failed",
+  running: "⟳ Running",
+  pending: "⏳ Pending",
+};
+
+function formatDateTime(dt: string | null): string {
+  if (!dt) return "—";
+  const d = new Date(dt);
+  if (isNaN(d.getTime())) return dt;
+  return d.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 export default function ExcelPage() {
-  const [files, setFiles] = useState<ExcelFile[]>([]);
+  const [files, setFiles] = useState<FileEntry[]>([]);
 
   useEffect(() => {
-    let isMounted = true;
-    const fetch = async () => {
+    let mounted = true;
+    const load = async () => {
       try {
         const res = await axios.get(`${API}/api/excel/files`);
-        if (isMounted) setFiles(res.data);
+        if (mounted) setFiles(res.data);
       } catch (err) {
         console.error(err);
       }
     };
-    fetch();
-    const interval = setInterval(fetch, 5000);
+    load();
+    const interval = setInterval(load, 5000);
     return () => {
-      isMounted = false;
+      mounted = false;
       clearInterval(interval);
     };
   }, []);
@@ -71,8 +103,8 @@ export default function ExcelPage() {
           </span>
         </h1>
         <p style={{ color: "var(--lh-muted)", fontSize: 14, marginTop: 8 }}>
-          Files are written live during scraping — download any time, even
-          mid-run.
+          All scrape runs — download anytime. Interrupted jobs rebuild from
+          database automatically.
         </p>
       </header>
 
@@ -89,22 +121,22 @@ export default function ExcelPage() {
             fontSize: 13,
           }}
         >
-          No files yet — start a scrape from the home page.
+          No scrape runs yet — start one from the home page.
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {[...files].reverse().map((file, i) => (
+          {files.map((file) => (
             <div
-              key={i}
+              key={file.jobId}
               style={{
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "space-between",
                 background: "var(--lh-surface)",
-                border: "1px solid var(--lh-border)",
+                border: `1px solid ${STATUS_COLOR[file.status] ?? "var(--lh-border)"}`,
                 borderRadius: "var(--r-lg)",
                 padding: "16px 20px",
-                transition: "border-color 0.2s",
+                opacity: file.status === "failed" ? 0.6 : 1,
               }}
             >
               <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
@@ -125,39 +157,85 @@ export default function ExcelPage() {
                 </div>
                 <div>
                   <div
-                    style={{ fontSize: 14, fontWeight: 500, marginBottom: 2 }}
+                    style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}
                   >
-                    {parseKeyword(file.name)}
+                    {file.keyword}
                   </div>
-                  <div
-                    style={{
-                      fontSize: 11,
-                      fontFamily: "var(--font-mono)",
-                      color: "var(--lh-muted)",
-                    }}
-                  >
-                    {parseDate(file.name)}
+                  <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontFamily: "var(--font-mono)",
+                        color: STATUS_COLOR[file.status],
+                      }}
+                    >
+                      {STATUS_LABEL[file.status] ?? file.status}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontFamily: "var(--font-mono)",
+                        color: "var(--lh-green)",
+                      }}
+                    >
+                      {file.emailCount.toLocaleString()} emails
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontFamily: "var(--font-mono)",
+                        color: "var(--lh-muted)",
+                      }}
+                    >
+                      {file.creditsUsed} credits
+                      {file.creditsExhausted ? " 🚫" : ""}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontFamily: "var(--font-mono)",
+                        color: "var(--lh-muted)",
+                      }}
+                    >
+                      {formatDateTime(file.createdAt)}
+                    </span>
                   </div>
                 </div>
               </div>
-              <a
-                href={`${API}${file.url}`}
-                download
-                style={{
-                  padding: "8px 18px",
-                  background: "var(--lh-green)",
-                  color: "#0a0a0f",
-                  borderRadius: "var(--r-md)",
-                  fontSize: 12,
-                  fontWeight: 700,
-                  fontFamily: "var(--font-mono)",
-                  letterSpacing: "0.06em",
-                  textDecoration: "none",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                ↓ DOWNLOAD
-              </a>
+
+              {file.emailCount > 0 ? (
+                <a
+                  href={`${API}/api/excel/download/${file.jobId}`}
+                  download
+                  style={{
+                    padding: "8px 18px",
+                    background: file.downloadable
+                      ? "var(--lh-green)"
+                      : "#f59e0b",
+                    color: "#0a0a0f",
+                    borderRadius: "var(--r-md)",
+                    fontSize: 12,
+                    fontWeight: 700,
+                    fontFamily: "var(--font-mono)",
+                    letterSpacing: "0.06em",
+                    textDecoration: "none",
+                    whiteSpace: "nowrap" as const,
+                  }}
+                >
+                  {file.downloadable ? "↓ DOWNLOAD" : "↓ RECOVER"}
+                </a>
+              ) : (
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontFamily: "var(--font-mono)",
+                    color: "var(--lh-muted)",
+                    padding: "8px 18px",
+                  }}
+                >
+                  no data
+                </span>
+              )}
             </div>
           ))}
         </div>

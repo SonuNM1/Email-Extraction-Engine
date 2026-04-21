@@ -3,12 +3,12 @@ const API = import.meta.env.VITE_API_URL ?? 'http://localhost:5000';
 export async function startScrape(
   keyword: string,
   email?: string | null,
-  pushSubscription?: PushSubscription | null
+  serperKey?: string | null
 ) {
   const res = await fetch(`${API}/api/scrape`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ keyword, email, pushSubscription }),
+    body: JSON.stringify({ keyword, email, serperKey  }),
   });
   return res.json();
 }

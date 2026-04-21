@@ -41,7 +41,6 @@ export async function extractEmailsFromMapsResults(
     jobId,
     sheet,
     seenEmails,
-    browser
   );
 
   // Enrich with maps metadata
