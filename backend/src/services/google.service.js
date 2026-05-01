@@ -163,7 +163,7 @@ export async function searchLocation(keyword, location) {
               "X-API-KEY": SERPER_KEY,
               "Content-Type": "application/json",
             },
-            timeout: 10000,
+            timeout: 15000,
           },
         );
 

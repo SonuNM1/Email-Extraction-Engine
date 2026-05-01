@@ -6,22 +6,7 @@ import excelRoutes from './routes/excel.routes.js';
 
 const app = express();
 
-app.use(cors({
-  origin: function(origin, callback) {
-    if (
-      !origin ||
-      origin.includes('localhost') ||
-      origin.includes('devtunnels.ms') ||
-      origin.includes('netlify.app') ||
-      origin.includes('onrender.com')
-    ) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true
-}));
+app.use(cors()) ; 
 
 app.use(express.json());
 app.use(cookieParser());

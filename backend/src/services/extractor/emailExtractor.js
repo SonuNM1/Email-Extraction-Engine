@@ -7,9 +7,14 @@ import Job from "../../models/job.model.js";
 
 const EMAIL_RE = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
 const DOMAIN_CONCURRENCY = 20;
-const AXIOS_TIMEOUT = 6000;
+const AXIOS_TIMEOUT = 8000;
 
-const CONTACT_PATHS = ["/contact", "/contact-us", "/about", "/about-us"];
+const CONTACT_PATHS = [
+  "/contact", "/contact-us", "/about", "/about-us",
+  "/about-us/contact", "/reach-us", "/get-in-touch",
+  "/connect", "/our-team", "/team", "/staff",
+  "/services", "/hello", "/info",
+];
 
 const BLOCKED_TLDS = /\.(gov|edu|org|mil|ac\.uk|nic\.in|edu\.et|ca|gr|it)$/i;
 
@@ -60,13 +65,7 @@ function rootDomain(input) {
     if (parts.length >= 3 && parts[parts.length - 2].length <= 3)
       return parts.slice(-3).join(".").toLowerCase();
     return parts.slice(-2).join(".").toLowerCase();
-  } catch { return ""; }
-}
-
-function domainMatches(email, sourceUrl) {
-  const emailRoot = rootDomain(email.split("@")[1] || "");
-  const pageRoot  = rootDomain(sourceUrl);
-  return emailRoot === pageRoot || pageRoot.includes(emailRoot) || emailRoot.includes(pageRoot);
+  } catch (e) { return ""; }
 }
 
 function isUsableEmail(email, sourceUrl) {
@@ -80,17 +79,9 @@ function isUsableEmail(email, sourceUrl) {
   if (local.startsWith("u003") || local.startsWith("u00")) return false;
   if (local.length >= 28 && /^[a-f0-9]+$/.test(local)) return false;
   if (email.includes("calendar.google") || email.includes("group.calendar")) return false;
-  if (!domainMatches(email, sourceUrl)) return false;
   if (REJECT_LOCALS.has(local)) return false;
-
-  // Accept list — high confidence
   if (ACCEPT_LOCALS.has(local)) return true;
-
-  // Named person pattern — john.doe, j.smith etc
   if (NAMED_PERSON_RE.test(local)) return true;
-
-  // ← RELAXED: accept any reasonable business email local part
-  // 3-35 chars, only normal characters, not starting/ending with dot/dash
   if (
     local.length >= 3 &&
     local.length <= 35 &&
@@ -98,7 +89,6 @@ function isUsableEmail(email, sourceUrl) {
     !local.includes("..") &&
     !local.includes("--")
   ) return true;
-
   return false;
 }
 
@@ -128,6 +118,7 @@ function extractEmailsFromHtml(html, sourceUrl) {
   if (!html) return [];
   const found = new Set();
 
+  // CloudFlare email decode
   for (const m of html.matchAll(/data-cfemail="([0-9a-f]+)"/gi)) {
     try {
       const enc = m[1];
@@ -139,11 +130,13 @@ function extractEmailsFromHtml(html, sourceUrl) {
     } catch (_) {}
   }
 
+  // mailto links
   for (const m of html.matchAll(/href=["']mailto:([^"'?\s&]+)/gi)) {
     const e = decodeURIComponent(m[1]).toLowerCase().trim();
     if (e.includes("@") && !e.includes(" ")) found.add(e);
   }
 
+  // Plain text / obfuscated
   const decoded = decodeObfuscated(html);
   for (const e of decoded.match(EMAIL_RE) || [])
     found.add(e.toLowerCase().trim());
@@ -172,34 +165,36 @@ async function fetchAxios(url) {
       validateStatus: s => s < 500,
     });
     return typeof data === "string" ? data : "";
-  } catch { return ""; }
+  } catch (e) { return ""; }
 }
 
-// ← Now returns array of up to 3 emails per domain
 async function getBestEmailsFromDomain(rootUrl, maxEmails = 3) {
   if (/\.(pdf|doc|docx|xls|xlsx|zip|mp4|jpg|png)$/i.test(rootUrl)) return [];
   const base   = rootUrl.replace(/\/$/, "");
   const domain = rootDomain(base);
   if (SPAM_ROOT_DOMAINS.has(domain) || IRRELEVANT_DOMAINS.has(domain)) return [];
 
+  // Always fetch homepage first — fastest signal
+  const homeHtml = await fetchAxios(base);
+  const candidates = [];
+  extractEmailsFromHtml(homeHtml, base).forEach(e => candidates.push(e));
+
+  // If homepage gave us enough, stop here — saves time
+  if (candidates.length >= maxEmails) {
+    const unique = [...new Set(candidates)];
+    unique.sort((a, b) => localPriority(a.split("@")[0]) - localPriority(b.split("@")[0]));
+    return unique.slice(0, maxEmails);
+  }
+
+  // Otherwise check contact/about pages in parallel
   const urlsToTry = CONTACT_PATHS.map(p => base + p);
   const limit     = pLimit(4);
-
   const htmlResults = await Promise.all(urlsToTry.map(url => limit(() => fetchAxios(url))));
-
-  const candidates = [];
   htmlResults.forEach((html, i) => {
     extractEmailsFromHtml(html, urlsToTry[i]).forEach(e => candidates.push(e));
   });
 
-  // Homepage fallback
-  if (candidates.length === 0) {
-    const homeHtml = await fetchAxios(base);
-    extractEmailsFromHtml(homeHtml, base).forEach(e => candidates.push(e));
-  }
-
   if (!candidates.length) return [];
-
   const unique = [...new Set(candidates)];
   unique.sort((a, b) => localPriority(a.split("@")[0]) - localPriority(b.split("@")[0]));
   return unique.slice(0, maxEmails);
@@ -217,13 +212,11 @@ export async function extractEmailsFromUrls(urls, keyword, location, jobId, shee
     urls.map(url =>
       domainLimit(async () => {
         try {
-          const emails = await getBestEmailsFromDomain(url); // ← array now
+          const emails = await getBestEmailsFromDomain(url);
           if (!emails.length) return;
-
           for (const email of emails) {
             if (seenEmails.has(email)) continue;
             seenEmails.add(email);
-
             const emailDoc = {
               email,
               website:      url,
@@ -234,12 +227,9 @@ export async function extractEmailsFromUrls(urls, keyword, location, jobId, shee
               phone:        "",
               address:      "",
             };
-
             results.push({ email, website: url, source: "google_search" });
             appendRow(sheet, emailDoc);
             logToJob(jobId, `✅ ${email} — ${url}`);
-
-            // Save to MongoDB immediately
             await Job.updateOne(
               { _id: jobId },
               {

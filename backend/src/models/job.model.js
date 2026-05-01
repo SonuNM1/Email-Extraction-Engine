@@ -20,6 +20,7 @@ const jobSchema = new mongoose.Schema({
   emailsFound:       { type: Number, default: 0 },
   serperCreditsUsed: { type: Number, default: 0 },
   creditsExhausted:  { type: Boolean, default: false },
+  locationProgress:  { type: mongoose.Schema.Types.Mixed, default: {} },
   startedAt:         { type: Date },
   completedAt:       { type: Date },
   stoppedAt:         { type: Date, default: null },

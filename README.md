@@ -38,3 +38,51 @@ EMAIL SCRAPE TOOL - V2 FEATURES
 6. EXPECTED IMPROVEMENT
    Current:  65 emails, 5 min, ~$0.01/run
    V2:       130+ emails, same 5-6 min, same cost
+
+
+
+## Monitoring and Alerting 
+
+- alert if app crashed automatically 
+- email/slack notification 
+
+- Tools: Sentry (error tracking)
+
+## Logging 
+
+- For every request there is error, event log. Console.log() isnt good for production. 
+
+- Tools: Winston - logs are saved in file or cloud 
+
+## Environment management 
+
+- Currently we have one environment - production 
+
+- Companies have 3 environment: Development, Staging, Production 
+
+   Development - developers work 
+   Staging - testing is done 
+   Production - real users use it 
+
+   Code goes first one staging, testing is done and then on production 
+
+## CI/CD Pipeline 
+
+- Currently git push -> render auto deploy 
+
+- In companies, git push -> tests run automatically -> if tests pass -> deployed on staging -> manual approval -> deploy on production 
+
+- Untested code doesn't go on production 
+
+## Database backups 
+
+- Currently MongoDB atlas free tier - no automatic backup 
+
+- In production, daily backup, point-in-time recovery 
+
+- if data deleted, then restore 
+
+## Security 
+
+- Currently missing: Helmet.js (HTTP security headers), INput validation, API authentication 
+

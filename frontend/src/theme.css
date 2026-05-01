@@ -1,46 +1,79 @@
-@import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600&display=swap');
-
-* { box-sizing: border-box; margin: 0; padding: 0; }
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 :root {
-  --lh-bg:        #0a0a0f;
-  --lh-surface:   #111118;
-  --lh-surface2:  #1a1a24;
-  --lh-border:    #2a2a3a;
-  --lh-green:     #00ff88;
-  --lh-green-dim: #00ff8815;
-  --lh-green-mid: #00cc6a;
-  --lh-cyan:      #00c4ff;
-  --lh-cyan-dim:  #00c4ff15;
-  --lh-text:      #f0f0f8;
-  --lh-muted:     #6b6b8a;
-  --lh-muted2:    #3a3a52;
-  --lh-warn:      #ffa502;
-  --lh-danger:    #ff4757;
-  --font-mono:    'Space Mono', monospace;
-  --font-sans:    'DM Sans', sans-serif;
-  --r-sm:  6px;
-  --r-md:  10px;
-  --r-lg:  16px;
+  --bg:           #eef2ff;
+  --surface:      #ffffff;
+  --surface-2:    #f8faff;
+  --border:       #dde5f5;
+
+  --primary:        #2563eb;
+  --primary-dark:   #1d4ed8;
+  --primary-light:  #eff6ff;
+  --primary-border: #bfdbfe;
+
+  --text:    #0f172a;
+  --text-2:  #334155;
+  --muted:   #64748b;
+  --muted-2: #94a3b8;
+
+  --success:        #059669;
+  --success-light:  #ecfdf5;
+  --success-border: #6ee7b7;
+
+  --warning:       #d97706;
+  --warning-light: #fffbeb;
+
+  --danger:       #dc2626;
+  --danger-light: #fef2f2;
+
+  --running:        #0ea5e9;
+  --running-light:  #f0f9ff;
+  --running-border: #bae6fd;
+
+  --font-sans: 'Plus Jakarta Sans', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 16px;
+  --r-xl: 24px;
+
+  --shadow-sm:   0 1px 4px rgba(15,23,42,0.06), 0 1px 2px rgba(15,23,42,0.04);
+  --shadow-md:   0 4px 16px rgba(15,23,42,0.08), 0 2px 6px rgba(15,23,42,0.04);
+  --shadow-lg:   0 8px 32px rgba(15,23,42,0.10), 0 4px 12px rgba(15,23,42,0.05);
+  --shadow-blue: 0 4px 24px rgba(37,99,235,0.22);
 }
 
-body {
-  background: var(--lh-bg);
-  color: var(--lh-text);
-  font-family: var(--font-sans);
-  -webkit-font-smoothing: antialiased;
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.5; transform: scale(0.8); }
 }
 
-@keyframes blink-dot {
-  0%, 100% { opacity: 1; }
-  50%       { opacity: 0.2; }
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
-@keyframes loc-pulse {
-  0%, 100% { border-color: #00c4ff40; }
-  50%       { border-color: #00c4ff99; }
+@keyframes slide-in {
+  from { opacity: 0; transform: translateX(-8px); }
+  to   { opacity: 1; transform: translateX(0); }
 }
 
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: var(--lh-surface); }
-::-webkit-scrollbar-thumb { background: var(--lh-border); border-radius: 3px; }
+/* Legacy aliases so ExcelPage still works */
+:root {
+  --lh-surface:  var(--surface);
+  --lh-border:   var(--border);
+  --lh-text:     var(--text);
+  --lh-muted:    var(--muted);
+  --lh-green:    var(--success);
+  --lh-cyan:     var(--running);
+  --lh-danger:   var(--danger);
+  --lh-warn:     var(--warning);
+  --lh-muted2:   var(--surface-2);
+  --font-mono:   var(--font-mono);
+  --font-sans:   var(--font-sans);
+  --r-md:        var(--r-md);
+  --r-lg:        var(--r-lg);
+  --r-sm:        var(--r-sm);
+  --lh-green-dim: var(--success-light);
+}

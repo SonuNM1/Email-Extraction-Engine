@@ -6,8 +6,10 @@ const SERPER_URL = "https://google.serper.dev/search";
 const PAGES_PER_QUERY = 10;
 const EARLY_EXIT_STREAK = 3;
 
-export const serperCredits = { used: 0, exhausted: false };
-const GLOBAL_SERPER_LIMIT = pLimit(5);
+// Keep export for any legacy imports — but per-job credits are passed in
+export const serperCredits = { used: 0, exhausted: false, remaining: null };
+
+const GLOBAL_SERPER_LIMIT = pLimit(4);
 
 const NEGATIVE_FILTERS = `
  -site:linkedin.com -site:facebook.com -site:instagram.com -site:twitter.com
@@ -20,6 +22,7 @@ const QUERY_TEMPLATES = [
   (kw, loc) => `"${kw}" "${loc}" "contact@" OR "info@" OR "hello@" ${NEGATIVE_FILTERS}`,
   (kw, loc) => `"${kw}" "${loc}" email ${NEGATIVE_FILTERS}`,
   (kw, loc) => `"${kw}" "${loc}" "contact us" ${NEGATIVE_FILTERS}`,
+  (kw, loc) => `"${kw}" "${loc}" "get in touch" OR "reach us" ${NEGATIVE_FILTERS}`,
 ];
 
 const BLOCKED_DOMAINS = new Set([
@@ -41,22 +44,27 @@ function isBlockedUrl(url) {
     const tld = host.split(".").pop();
     if (tld.length === 2 && !["us","co","io"].includes(tld)) return true;
     return [...BLOCKED_DOMAINS].some(d => host === d || host.endsWith("." + d));
-  } catch { return true; }
+  } catch (e) { return true; }
 }
 
 function getDomain(url) {
-  try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return null; }
+  try { return new URL(url).hostname.replace(/^www\./, ""); } catch (e) { return null; }
 }
 
-async function serperRequest(query, page, apiKey) {
+async function serperRequest(query, page, apiKey, credits) {
   const key = apiKey || process.env.SERPER_API_KEY;
-  const { data } = await axios.post(
+  const response = await axios.post(
     SERPER_URL,
     { q: query, num: 10, page, gl: "us", hl: "en" },
-    { headers: { "X-API-KEY": key, "Content-Type": "application/json" }, timeout: 10000 }
+    { headers: { "X-API-KEY": key, "Content-Type": "application/json" }, timeout: 15000 }
   );
-  serperCredits.used += 1;
-  return data;
+  credits.used += 1;
+  // Read remaining credits from response header
+  const remaining = response.headers['x-ratelimit-remaining'];
+  if (remaining !== undefined) {
+    credits.remaining = parseInt(remaining, 10);
+  }
+  return response.data;
 }
 
 function parseResults(data, seenDomains, results) {
@@ -74,37 +82,39 @@ function parseResults(data, seenDomains, results) {
   return newCount;
 }
 
-export async function searchLocation(keyword, location, apiKey) {
+export async function searchLocation(keyword, location, apiKey, credits) {
+  // Fallback to module-level if no per-job credits passed
+  const c = credits || serperCredits;
   const seenDomains = new Set();
   const results = [];
 
   for (const template of QUERY_TEMPLATES) {
-    if (serperCredits.exhausted) break;
+    if (c.exhausted) break;
     const query = template(keyword, location);
     let emptyStreak = 0;
 
     for (let page = 1; page <= PAGES_PER_QUERY; page++) {
-      if (serperCredits.exhausted) break;
+      if (c.exhausted) break;
 
       await GLOBAL_SERPER_LIMIT(async () => {
         try {
-          const data = await serperRequest(query, page, apiKey);
+          const data = await serperRequest(query, page, apiKey, c);
           const found = parseResults(data, seenDomains, results);
           if (found === 0) emptyStreak++;
           else emptyStreak = 0;
         } catch (err) {
           const status = err.response?.status;
           if (status === 400) {
-            if (!serperCredits.exhausted) {
-              serperCredits.exhausted = true;
+            if (!c.exhausted) {
+              c.exhausted = true;
               console.error(`🚫 Credits exhausted at [${location} p${page}]`);
               GLOBAL_SERPER_LIMIT.clearQueue();
             }
           } else if (status === 429) {
             await new Promise(r => setTimeout(r, 4000));
-            if (!serperCredits.exhausted) {
+            if (!c.exhausted) {
               try {
-                const data = await serperRequest(query, page, apiKey);
+                const data = await serperRequest(query, page, apiKey, c);
                 const found = parseResults(data, seenDomains, results);
                 if (found === 0) emptyStreak++;
                 else emptyStreak = 0;
