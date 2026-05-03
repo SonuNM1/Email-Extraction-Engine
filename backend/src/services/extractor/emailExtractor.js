@@ -9,12 +9,7 @@ const EMAIL_RE = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
 const DOMAIN_CONCURRENCY = 20;
 const AXIOS_TIMEOUT = 8000;
 
-const CONTACT_PATHS = [
-  "/contact", "/contact-us", "/about", "/about-us",
-  "/about-us/contact", "/reach-us", "/get-in-touch",
-  "/connect", "/our-team", "/team", "/staff",
-  "/services", "/hello", "/info",
-];
+const CONTACT_PATHS = ["/contact", "/contact-us", "/about", "/about-us"];
 
 const BLOCKED_TLDS = /\.(gov|edu|org|mil|ac\.uk|nic\.in|edu\.et|ca|gr|it)$/i;
 
@@ -56,6 +51,12 @@ const ACCEPT_LOCALS = new Set([
 ]);
 
 const NAMED_PERSON_RE = /^[a-z]{1,3}\.?[a-z]{2,20}(\.[a-z]{2,20})?$/;
+
+function domainMatches(email, sourceUrl) {
+  const emailRoot = rootDomain(email.split("@")[1] || "");
+  const pageRoot  = rootDomain(sourceUrl);
+  return emailRoot === pageRoot || pageRoot.includes(emailRoot) || emailRoot.includes(pageRoot);
+}
 
 function rootDomain(input) {
   try {
@@ -173,27 +174,18 @@ async function getBestEmailsFromDomain(rootUrl, maxEmails = 3) {
   const base   = rootUrl.replace(/\/$/, "");
   const domain = rootDomain(base);
   if (SPAM_ROOT_DOMAINS.has(domain) || IRRELEVANT_DOMAINS.has(domain)) return [];
-
-  // Always fetch homepage first — fastest signal
-  const homeHtml = await fetchAxios(base);
-  const candidates = [];
-  extractEmailsFromHtml(homeHtml, base).forEach(e => candidates.push(e));
-
-  // If homepage gave us enough, stop here — saves time
-  if (candidates.length >= maxEmails) {
-    const unique = [...new Set(candidates)];
-    unique.sort((a, b) => localPriority(a.split("@")[0]) - localPriority(b.split("@")[0]));
-    return unique.slice(0, maxEmails);
-  }
-
-  // Otherwise check contact/about pages in parallel
   const urlsToTry = CONTACT_PATHS.map(p => base + p);
   const limit     = pLimit(4);
   const htmlResults = await Promise.all(urlsToTry.map(url => limit(() => fetchAxios(url))));
+  const candidates = [];
   htmlResults.forEach((html, i) => {
     extractEmailsFromHtml(html, urlsToTry[i]).forEach(e => candidates.push(e));
   });
-
+  // Homepage fallback only if contact pages found nothing
+  if (candidates.length === 0) {
+    const homeHtml = await fetchAxios(base);
+    extractEmailsFromHtml(homeHtml, base).forEach(e => candidates.push(e));
+  }
   if (!candidates.length) return [];
   const unique = [...new Set(candidates)];
   unique.sort((a, b) => localPriority(a.split("@")[0]) - localPriority(b.split("@")[0]));

@@ -3,6 +3,7 @@ import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import scraperRoutes from './routes/scraper.routes.js';
 import excelRoutes from './routes/excel.routes.js';
+import apiKeyRoutes from "./routes/apiKey.routes.js"; 
 
 const app = express();
 
@@ -13,5 +14,6 @@ app.use(cookieParser());
 
 app.use('/api/scrape', scraperRoutes);
 app.use('/api/excel', excelRoutes);
+app.use("/api/keys", apiKeyRoutes); 
 
 export default app;

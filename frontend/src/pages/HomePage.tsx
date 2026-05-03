@@ -4,6 +4,7 @@ import type { JobEntry } from "../hooks/useScrapeJob";
 import { ApiKeyVault } from "../components/ApiKeyVault";
 import { LocationGrid } from "../components/LocationGrid";
 import { LOCATIONS } from "../utils/locations";
+import { useApiKeys } from "../hooks/useApiKeys";
 
 const API = import.meta.env.VITE_API_URL || "";
 
@@ -129,13 +130,13 @@ function JobCard({
               Stop
             </button>
           )}
-          {isTerminal && jobId && (
+          {jobId && totalEmails > 0 && (
             <a
-              href={`${API}/api/scrape/${jobId}/download`}
+              href={`/api/scrape/${jobId}/download`}
               download={`${keyword}-emails.xlsx`}
               style={{
                 padding: "5px 14px",
-                background: "var(--primary)",
+                background: isRunning ? "var(--running)" : "var(--primary)",
                 border: "none",
                 borderRadius: "var(--r-sm)",
                 color: "#fff",
@@ -147,7 +148,7 @@ function JobCard({
                 gap: 4,
               }}
             >
-              ↓ Excel
+              {isRunning ? "↓ Partial" : "↓ Excel"}
             </a>
           )}
           {isTerminal && (
@@ -281,7 +282,8 @@ function JobCard({
 }
 
 export function HomePage() {
-  const { jobs, start, stop, remove } = useScrapeJobs();
+  const { keys, addKey, removeKey, updateCredits } = useApiKeys();
+  const { jobs, start, stop, remove } = useScrapeJobs(updateCredits);
   const [keyword, setKeyword] = useState("");
   const [serperKey, setSerperKey] = useState("");
   const [showKey, setShowKey] = useState(false);
@@ -702,6 +704,10 @@ export function HomePage() {
             <ApiKeyVault
               onUse={(key) => setSerperKey(key)}
               activeKey={serperKey}
+              keys={keys}
+              onAdd={addKey}
+              onRemove={removeKey}
+              onMarkExhausted={(key) => updateCredits(key, 0)}
             />
           </div>
         </div>

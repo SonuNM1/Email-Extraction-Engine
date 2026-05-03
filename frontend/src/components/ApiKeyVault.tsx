@@ -1,15 +1,12 @@
 import { useState } from "react";
-
-interface StoredKey {
-  id: string;
-  key: string;
-  creditsRemaining?: number;
-  lastChecked?: string;
-}
-
+import type { StoredKey } from "../hooks/useApiKeys";
 interface Props {
   onUse: (key: string) => void;
   activeKey: string;
+  keys: StoredKey[];
+  onAdd: (key: string) => void;
+  onRemove: (id: string) => void;
+  onMarkExhausted: (key: string) => void;
 }
 
 function maskKey(key: string): string {
@@ -17,77 +14,38 @@ function maskKey(key: string): string {
   return key.slice(0, 5) + " •••••••••••• " + key.slice(-4);
 }
 
-export function ApiKeyVault({ onUse, activeKey }: Props) {
-  const [keys, setKeys] = useState<StoredKey[]>(() => {
-    try {
-      const saved = localStorage.getItem("apiKeyVault");
-      return saved ? JSON.parse(saved) : [];
-    } catch (e) {
-      return [];
-    }
-  });
+export function ApiKeyVault({ onUse, activeKey, keys, onAdd, onRemove, onMarkExhausted }: Props) {
   const [input, setInput] = useState("");
 
-  const addKey = () => {
+  const handleAdd = () => {
     const trimmed = input.trim();
-    if (!trimmed || keys.some((k) => k.key === trimmed)) return;
-    const updated = [...keys, { id: Date.now().toString(), key: trimmed }];
-    setKeys(updated);
-    localStorage.setItem("apiKeyVault", JSON.stringify(updated));
+    if (!trimmed) return;
+    onAdd(trimmed);
     setInput("");
-  };
-
-  const removeKey = (id: string) => {
-    const updated = keys.filter((k) => k.id !== id);
-    setKeys(updated);
-    localStorage.setItem("apiKeyVault", JSON.stringify(updated));
-  };
-
-  const inputBase: React.CSSProperties = {
-    width: "100%",
-    padding: "10px 12px",
-    border: "1.5px solid var(--border)",
-    borderRadius: "var(--r-md)",
-    fontSize: 12,
-    fontFamily: "var(--font-mono)",
-    color: "var(--text)",
-    background: "var(--surface)",
-    outline: "none",
-    boxSizing: "border-box",
-    transition: "border-color 0.2s, box-shadow 0.2s",
   };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
       {/* Title */}
-      <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <div
           style={{
+            width: 28,
+            height: 28,
+            background: "var(--primary-light)",
+            border: "1px solid var(--primary-border)",
+            borderRadius: 8,
             display: "flex",
             alignItems: "center",
-            gap: 8,
-            marginBottom: 6,
+            justifyContent: "center",
+            fontSize: 14,
           }}
         >
-          <div
-            style={{
-              width: 28,
-              height: 28,
-              background: "var(--primary-light)",
-              border: "1px solid var(--primary-border)",
-              borderRadius: 8,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 14,
-            }}
-          >
-            🔑
-          </div>
-          <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text)" }}>
-            API Key Vault
-          </span>
+          🔑
         </div>
+        <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text)" }}>
+          API Key Vault
+        </span>
       </div>
 
       {/* Input + Add */}
@@ -97,8 +55,20 @@ export function ApiKeyVault({ onUse, activeKey }: Props) {
           placeholder="Paste Serper API key..."
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && addKey()}
-          style={inputBase}
+          onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+          style={{
+            width: "100%",
+            padding: "10px 12px",
+            border: "1.5px solid var(--border)",
+            borderRadius: "var(--r-md)",
+            fontSize: 12,
+            fontFamily: "var(--font-mono)",
+            color: "var(--text)",
+            background: "var(--surface)",
+            outline: "none",
+            boxSizing: "border-box",
+            transition: "border-color 0.2s, box-shadow 0.2s",
+          }}
           onFocus={(e) => {
             e.target.style.borderColor = "var(--primary)";
             e.target.style.boxShadow = "0 0 0 3px rgba(37,99,235,0.1)";
@@ -109,17 +79,17 @@ export function ApiKeyVault({ onUse, activeKey }: Props) {
           }}
         />
         <button
-          onClick={addKey}
+          onClick={handleAdd}
           disabled={!input.trim()}
           style={{
             padding: "9px",
-            background: input.trim() ? "var(--primary)" : "var(--border)",
-            color: input.trim() ? "#fff" : "var(--muted)",
             border: "none",
             borderRadius: "var(--r-md)",
             fontSize: 12,
             fontWeight: 700,
             cursor: input.trim() ? "pointer" : "not-allowed",
+            background: input.trim() ? "var(--primary)" : "var(--border)",
+            color: input.trim() ? "#fff" : "var(--muted)",
             transition: "all 0.2s",
           }}
           onMouseEnter={(e) => {
@@ -142,7 +112,7 @@ export function ApiKeyVault({ onUse, activeKey }: Props) {
 
       {/* Stored keys */}
       <div>
-        <div
+        <p
           style={{
             fontSize: 11,
             fontWeight: 700,
@@ -153,7 +123,7 @@ export function ApiKeyVault({ onUse, activeKey }: Props) {
           }}
         >
           Stored Keys ({keys.length})
-        </div>
+        </p>
 
         {keys.length === 0 ? (
           <div
@@ -177,23 +147,23 @@ export function ApiKeyVault({ onUse, activeKey }: Props) {
               const isActive = activeKey === k.key;
               return (
                 <div
-                  key={k.id}
+                  key={k._id}
                   style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
                     padding: "10px 12px",
                     borderRadius: "var(--r-md)",
                     border: `1.5px solid ${isActive ? "var(--primary)" : "var(--border)"}`,
                     background: isActive
                       ? "var(--primary-light)"
                       : "var(--surface-2)",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
                     transition: "all 0.2s",
-                    animation: "slide-in 0.25s ease",
                   }}
                 >
+                  {/* Key info */}
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div
+                    <p
                       style={{
                         fontSize: 11,
                         fontFamily: "var(--font-mono)",
@@ -201,10 +171,11 @@ export function ApiKeyVault({ onUse, activeKey }: Props) {
                         overflow: "hidden",
                         textOverflow: "ellipsis",
                         whiteSpace: "nowrap",
+                        margin: 0,
                       }}
                     >
                       {maskKey(k.key)}
-                    </div>
+                    </p>
                     <div
                       style={{
                         display: "flex",
@@ -215,12 +186,15 @@ export function ApiKeyVault({ onUse, activeKey }: Props) {
                       }}
                     >
                       {/* Credits badge */}
-                      {k.creditsRemaining !== undefined ? (
+                      {k.creditsRemaining !== undefined &&
+                      k.creditsRemaining !== null ? (
                         <span
                           style={{
                             fontSize: 10,
                             fontFamily: "var(--font-mono)",
                             fontWeight: 700,
+                            padding: "1px 6px",
+                            borderRadius: 4,
                             color:
                               k.creditsRemaining === 0
                                 ? "#dc2626"
@@ -233,15 +207,7 @@ export function ApiKeyVault({ onUse, activeKey }: Props) {
                                 : k.creditsRemaining < 200
                                   ? "#fffbeb"
                                   : "#ecfdf5",
-                            border: `1px solid ${
-                              k.creditsRemaining === 0
-                                ? "#fecaca"
-                                : k.creditsRemaining < 200
-                                  ? "#fde68a"
-                                  : "#6ee7b7"
-                            }`,
-                            borderRadius: 4,
-                            padding: "1px 6px",
+                            border: `1px solid ${k.creditsRemaining === 0 ? "#fecaca" : k.creditsRemaining < 200 ? "#fde68a" : "#6ee7b7"}`,
                           }}
                         >
                           {k.creditsRemaining === 0
@@ -252,31 +218,31 @@ export function ApiKeyVault({ onUse, activeKey }: Props) {
                         <span
                           style={{
                             fontSize: 10,
-                            color: "var(--muted-2)",
                             fontFamily: "var(--font-mono)",
+                            color: "var(--muted-2)",
                           }}
                         >
                           ⚪ Never used
                         </span>
                       )}
-                      {/* Active indicator */}
                       {isActive && (
                         <span
                           style={{
                             fontSize: 10,
-                            color: "var(--primary)",
                             fontWeight: 700,
+                            color: "var(--primary)",
                             display: "flex",
                             alignItems: "center",
                             gap: 3,
                           }}
                         >
-                          <div
+                          <span
                             style={{
                               width: 5,
                               height: 5,
                               borderRadius: "50%",
                               background: "var(--primary)",
+                              display: "inline-block",
                               animation: "pulse-dot 2s infinite",
                             }}
                           />
@@ -285,7 +251,8 @@ export function ApiKeyVault({ onUse, activeKey }: Props) {
                       )}
                     </div>
                   </div>
-                  {/* Actions */}
+
+                  {/* Use button */}
                   <button
                     onClick={() => onUse(k.key)}
                     style={{
@@ -294,17 +261,39 @@ export function ApiKeyVault({ onUse, activeKey }: Props) {
                       fontWeight: 700,
                       border: `1.5px solid ${isActive ? "var(--primary)" : "var(--primary-border)"}`,
                       borderRadius: "var(--r-sm)",
+                      cursor: "pointer",
                       background: isActive ? "var(--primary)" : "transparent",
                       color: isActive ? "#fff" : "var(--primary)",
-                      cursor: "pointer",
                       transition: "all 0.15s",
                       whiteSpace: "nowrap",
                     }}
                   >
                     {isActive ? "✓ Using" : "Use"}
                   </button>
+
+                  {/* Mark exhausted button */}
+                  {k.creditsRemaining !== 0 && (
+                    <button
+                      onClick={() => onMarkExhausted(k.key)}
+                      title="Mark as exhausted"
+                      style={{
+                        padding: "4px 8px",
+                        fontSize: 10,
+                        fontWeight: 700,
+                        border: "1px solid #fecaca",
+                        borderRadius: "var(--r-sm)",
+                        background: "transparent",
+                        color: "#dc2626",
+                        cursor: "pointer",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      🔴
+                    </button>
+                  )}
+                  {/* Remove button */}
                   <button
-                    onClick={() => removeKey(k.id)}
+                    onClick={() => onRemove(k._id)}
                     style={{
                       padding: "4px 8px",
                       fontSize: 12,
@@ -331,12 +320,12 @@ export function ApiKeyVault({ onUse, activeKey }: Props) {
           background: "var(--primary-light)",
           border: "1px solid var(--primary-border)",
           borderRadius: "var(--r-md)",
-          fontSize: 14,
+          fontSize: 11,
           color: "var(--primary)",
           lineHeight: 1.7,
         }}
       >
-        💡 <strong></strong> Sign up with a temp email at{" "}
+        💡 Sign up with a temp email at{" "}
         <a
           href="https://serper.dev"
           target="_blank"
@@ -345,7 +334,7 @@ export function ApiKeyVault({ onUse, activeKey }: Props) {
         >
           serper.dev
         </a>{" "}
-        to get 2,500 fresh credits per account.
+        to get 2,500 free credits per account.
       </div>
     </div>
   );

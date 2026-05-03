@@ -14,7 +14,12 @@ export const connectDB = async () => {
       throw new Error("MONGO_URI is missing in .env");
     }
 
-    await mongoose.connect(uri);
+    await mongoose.connect(uri, {
+      serverSelectionTimeoutMS: 10000,
+      socketTimeoutMS: 60000,
+      heartbeatFrequencyMS: 10000,
+      retryWrites: true,
+    });
 
     console.log(chalk.bold.green("Database Connected ✅"));
   } catch (error) {

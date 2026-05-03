@@ -3,7 +3,7 @@ import axios from "axios";
 import { toast } from "sonner";
 import type { Job } from "../types/job.types";
 
-const API = import.meta.env.VITE_API_URL || '';
+const API = import.meta.env.VITE_API_URL || "";
 
 export interface JobEntry {
   jobId: string;
@@ -13,6 +13,30 @@ export interface JobEntry {
   logs: string[];
   loading: boolean;
   error: string | null;
+}
+
+const ACTIVE_JOBS_KEY = "activeJobIds";
+
+function saveActiveJobs(jobs: JobEntry[]) {
+  const running = jobs
+    .filter(
+      (j) => !["completed", "stopped", "failed"].includes(j.job?.status ?? ""),
+    )
+    .map((j) => ({ jobId: j.jobId, keyword: j.keyword, location: j.location }));
+  localStorage.setItem(ACTIVE_JOBS_KEY, JSON.stringify(running));
+}
+
+function loadActiveJobs(): {
+  jobId: string;
+  keyword: string;
+  location: string;
+}[] {
+  try {
+    const saved = localStorage.getItem(ACTIVE_JOBS_KEY);
+    return saved ? JSON.parse(saved) : [];
+  } catch (e) {
+    return [];
+  }
 }
 
 async function fetchJobStatus(jobId: string) {
@@ -25,27 +49,11 @@ async function apiStartScrape(keyword: string, serperKey: string | null) {
   return res.data;
 }
 
-function saveCreditsToVault(key: string | null, remaining: number | null) {
-  if (!key || remaining === null || remaining === undefined) return;
-  try {
-    const saved = localStorage.getItem("apiKeyVault");
-    if (!saved) return;
-    const keys = JSON.parse(saved);
-    const updated = keys.map((k: any) =>
-      k.key === key
-        ? {
-            ...k,
-            creditsRemaining: remaining,
-            lastChecked: new Date().toISOString(),
-          }
-        : k,
-    );
-    localStorage.setItem("apiKeyVault", JSON.stringify(updated));
-  } catch (e) {}
-}
-
-export function useScrapeJobs() {
+export function useScrapeJobs(
+  onCreditsUpdate?: (key: string, remaining: number) => void,
+) {
   const [jobs, setJobs] = useState<JobEntry[]>([]);
+  const didRestore = useRef(false);
   const intervalsRef = useRef<Record<string, ReturnType<typeof setInterval>>>(
     {},
   );
@@ -82,6 +90,16 @@ export function useScrapeJobs() {
           const data = await fetchJobStatus(jobId);
           updateJob(jobId, { job: data, loading: false });
 
+          if (serperKey) {
+            const remaining =
+              data.creditsExhausted && data.creditsRemaining == null
+                ? 0
+                : data.creditsRemaining;
+            if (remaining != null) {
+              onCreditsUpdate?.(serperKey, remaining);
+            }
+          }
+
           if (data.status === "completed") {
             stopPolling(jobId);
             stopLogs(jobId);
@@ -89,22 +107,52 @@ export function useScrapeJobs() {
               id: jobId,
               duration: 6000,
             });
+            if (data.creditsExhausted) {
+              toast.warning(
+                `🚫 Credits exhausted — add a new key to continue`,
+                {
+                  duration: 8000,
+                },
+              );
+            }
             triggerDownload(jobId, keyword);
-            saveCreditsToVault(serperKey, data.creditsRemaining);
+            if (serperKey) {
+              const remaining =
+                data.creditsExhausted && data.creditsRemaining == null
+                  ? 0
+                  : data.creditsRemaining;
+              if (remaining != null) {
+                onCreditsUpdate?.(serperKey, remaining);
+              }
+            }
           }
+
           if (data.status === "stopped") {
             stopPolling(jobId);
             stopLogs(jobId);
-            toast.warning(
-              `⏹️ Stopped — ${data.totalEmailsFound} emails saved`,
-              {
-                id: jobId,
-                duration: 6000,
-              },
-            );
+            if (data.creditsExhausted) {
+              toast.warning(
+                `🚫 Credits exhausted — ${data.totalEmailsFound} emails saved. Add a new key.`,
+                { id: jobId, duration: 8000 },
+              );
+            } else {
+              toast.warning(
+                `⏹️ Stopped — ${data.totalEmailsFound} emails saved`,
+                { id: jobId, duration: 6000 },
+              );
+            }
             triggerDownload(jobId, keyword);
-            saveCreditsToVault(serperKey, data.creditsRemaining);
+            if (serperKey) {
+              const remaining =
+                data.creditsExhausted && data.creditsRemaining == null
+                  ? 0
+                  : data.creditsRemaining;
+              if (remaining != null) {
+                onCreditsUpdate?.(serperKey, remaining);
+              }
+            }
           }
+
           if (data.status === "failed") {
             stopPolling(jobId);
             stopLogs(jobId);
@@ -119,12 +167,13 @@ export function useScrapeJobs() {
       poll();
       intervalsRef.current[jobId] = setInterval(poll, 5000);
     },
-    [],
+    [onCreditsUpdate],
   );
 
   const attachLogStream = useCallback((jobId: string) => {
     const es = new EventSource(`${API}/api/scrape/${jobId}/logs`);
     esRef.current[jobId] = es;
+
     es.onmessage = (event) => {
       const msg = JSON.parse(event.data) as string;
       setJobs((prev) =>
@@ -133,6 +182,7 @@ export function useScrapeJobs() {
         ),
       );
     };
+
     es.onerror = () => es.close();
   }, []);
 
@@ -140,6 +190,7 @@ export function useScrapeJobs() {
     async (keyword: string, serperKey: string | null) => {
       const toastId = `start-${Date.now()}`;
       toast.loading(`Starting...`, { id: toastId });
+
       try {
         const { jobId } = await apiStartScrape(keyword, serperKey);
         const entry: JobEntry = {
@@ -151,11 +202,13 @@ export function useScrapeJobs() {
           loading: true,
           error: null,
         };
+
         setJobs((prev) => [entry, ...prev]);
         toast.success(`🚀 Started — "${keyword}" across all 55 locations`, {
           id: toastId,
           duration: 3000,
         });
+
         attachPoller(jobId, keyword, serperKey);
         attachLogStream(jobId);
         return jobId;
@@ -181,6 +234,33 @@ export function useScrapeJobs() {
     stopLogs(jobId);
     setJobs((prev) => prev.filter((j) => j.jobId !== jobId));
   }, []);
+
+  // Save active jobs whenever jobs state changes
+  useEffect(() => {
+    saveActiveJobs(jobs);
+  }, [jobs]);
+
+  // On mount — restore any jobs that were running before page closed
+  useEffect(() => {
+    if (didRestore.current) return;
+    didRestore.current = true;
+    const saved = loadActiveJobs();
+    if (!saved.length) return;
+    const restored: JobEntry[] = saved.map((s) => ({
+      jobId: s.jobId,
+      keyword: s.keyword,
+      location: s.location,
+      job: null,
+      logs: [],
+      loading: true,
+      error: null,
+    }));
+    setJobs(restored);
+    restored.forEach((entry) => {
+      attachPoller(entry.jobId, entry.keyword, null);
+      attachLogStream(entry.jobId);
+    });
+  }, [attachPoller, attachLogStream]);
 
   useEffect(
     () => () => {
