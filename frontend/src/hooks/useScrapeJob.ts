@@ -158,8 +158,14 @@ export function useScrapeJobs(
             stopLogs(jobId);
             toast.error(`❌ Job failed`, { id: jobId });
           }
-        } catch {
-          updateJob(jobId, { error: "Lost connection" });
+        } catch (err: any) {
+          const msg =
+            err?.response?.status === 503
+              ? "Server offline — check Railway dashboard"
+              : err?.response?.status === 404
+                ? "Job not found"
+                : err?.message || "Lost connection";
+          updateJob(jobId, { error: msg });
           stopPolling(jobId);
           stopLogs(jobId);
         }
