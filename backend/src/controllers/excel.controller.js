@@ -44,7 +44,7 @@ export const getExcelFiles = async (req, res) => {
     const jobs = await Job.find(
       {},
       'keyword status filePath serperCreditsUsed creditsExhausted emailsFound emails startedAt completedAt stoppedAt createdAt'
-    ).sort({ createdAt: -1 }).limit(50);
+    ).sort({ createdAt: -1 }).limit(100);
 
     const files = jobs.map(job => ({
       jobId:            job._id,

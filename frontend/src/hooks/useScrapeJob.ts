@@ -90,6 +90,13 @@ export function useScrapeJobs(
           const data = await fetchJobStatus(jobId);
           updateJob(jobId, { job: data, loading: false });
 
+          if (data.creditsExhausted && !data._prevExhausted) {
+            toast.warning(
+              `🚫 Serper credits exhausted — go to API Key Vault, add a fresh key from serper.dev and click Use`,
+              { duration: 12000 },
+            );
+          }
+
           if (serperKey) {
             const remaining =
               data.creditsExhausted && data.creditsRemaining == null

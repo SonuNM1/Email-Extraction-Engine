@@ -14,8 +14,33 @@ const CONTACT_PATHS = ["/contact", "/contact-us", "/about", "/about-us"];
 const BLOCKED_TLDS = /\.(gov|edu|org|mil|ac\.uk|nic\.in|edu\.et|ca|gr|it)$/i;
 
 const FREE_DOMAINS = new Set([
+  // Personal email providers
   "gmail.com","yahoo.com","hotmail.com","outlook.com","icloud.com",
-  "aol.com","protonmail.com","ymail.com",
+  "aol.com","protonmail.com","ymail.com","mail.com","zoho.com",
+  "gmx.com","gmx.net","live.com","msn.com","me.com","mac.com",
+  "inbox.com","fastmail.com","hushmail.com","tutanota.com",
+  "proton.me","pm.me","mailfence.com","runbox.com",
+
+  // Placeholder / template / fake domains
+  "example.com","example.org","example.net",
+  "test.com","testing.com","demo.com","fake.com","dummy.com",
+  "placeholder.com","yoursite.com","yourdomain.com","youremail.com",
+  "mysite.com","mywebsite.com","mydomain.com","myemail.com",
+  "company.com","business.com","email.com","mailservice.com",
+  "domain.com","website.com","webmail.com","sampleemail.com",
+  "noemail.com","noreply.com","nomail.com","nowhere.com",
+  "mailinator.com","guerrillamail.com","tempmail.com","throwam.com",
+  "sharklasers.com","guerrillamailblock.com","grr.la","spam4.me",
+  "trashmail.com","dispostable.com","maildrop.cc","yopmail.com",
+
+  // Hosting platform leaked emails
+  "godaddy.com","wpengine.com","kinsta.com","siteground.com",
+  "bluehost.com","hostgator.com","namecheap.com","dreamhost.com",
+  "a2hosting.com","inmotion.com","hostinger.com","ionos.com",
+  "ftpupload.com","000webhostapp.com","weebly.com","wixsite.com",
+  "wordpress.com","blogspot.com","squarespace.com","webflow.io",
+  "netlify.app","vercel.app","github.io","pages.dev",
+  "mystrikingly.com","jimdo.com","strikingly.com",
 ]);
 
 const SPAM_ROOT_DOMAINS = new Set([
@@ -23,9 +48,123 @@ const SPAM_ROOT_DOMAINS = new Set([
 ]);
 
 const IRRELEVANT_DOMAINS = new Set([
-  "aeroleads.com","contactout.com","leadz.biz","fliphtml5.com","heyzine.com",
-  "scrap.io","prospeo.io","neverbounce.com","bullberry.com","icrunchdata.com",
-  "hireclick.com","dirxion.com","parishesonline.com","bidbro.com",
+  // ── Lead gen / email finder tools ──────────────────────────────────────
+  "aeroleads.com","contactout.com","leadz.biz","scrap.io","prospeo.io",
+  "neverbounce.com","icrunchdata.com","hireclick.com","bidbro.com",
+  "rocketreach.co","zoominfo.com","apollo.io","hunter.io","lusha.com",
+  "seamless.ai","clearbit.com","leadiq.com","signalhire.com","skymem.info",
+  "email-format.com","findthatlead.com","voilanorbert.com","getprospect.io",
+  "snov.io","uplead.com","adapt.io","slintel.com","cognism.com",
+  "demandbase.com","6sense.com","bombora.com","oceanos.com",
+  "infoglobaldata.com","rentechdigital.com","mooreinfoinc.com",
+  "restaurantemaillist.com","emaildatabase.com","listgiant.com",
+  "usadata.com","infousa.com","databaseusa.com","salesintel.io",
+  "hgdata.com","datanyze.com","builtwith.com","similarweb.com",
+
+  // ── Document / PDF hosting ──────────────────────────────────────────────
+  "calameo.com","pdfcoffee.com","anyflip.com","fliphtml5.com",
+  "heyzine.com","issuu.com","scribd.com","yumpu.com","slideshare.net",
+  "slideserve.com","authorstream.com","slidebean.com","canva.com",
+  "prezi.com","emaze.com","zoho.com","docdroid.net","docplayer.net",
+  "academia.edu","researchgate.net","pubpub.org","zenodo.org",
+
+  // ── Job boards / recruiting ─────────────────────────────────────────────
+  "indeed.com","glassdoor.com","ziprecruiter.com","monster.com",
+  "careerbuilder.com","simplyhired.com","dice.com","theladders.com",
+  "jobvite.com","greenhouse.io","lever.co","workday.com","taleo.net",
+  "icims.com","brassring.com","smartrecruiters.com","recruitee.com",
+  "workable.com","bamboohr.com","gusto.com","rippling.com",
+  "linkedin.com","hired.com","vetlypetcare.com",
+
+  // ── Social media ────────────────────────────────────────────────────────
+  "facebook.com","instagram.com","twitter.com","x.com","tiktok.com",
+  "youtube.com","pinterest.com","snapchat.com","reddit.com","tumblr.com",
+  "threads.net","whatsapp.com","telegram.org","discord.com",
+  "lemon8-app.com","clubhouse.com","mastodon.social",
+
+  // ── Directories / review sites ──────────────────────────────────────────
+  "yelp.com","yellowpages.com","tripadvisor.com","bbb.org","manta.com",
+  "angi.com","thumbtack.com","homeadvisor.com","houzz.com","angieslist.com",
+  "dandb.com","mapquest.com","spoke.com","thebluebook.com","buildzoom.com",
+  "bark.com","clutch.co","sortlist.com","goodfirms.co","upcity.com",
+  "expertise.com","designrush.com","topratedlocal.com","birdeye.com",
+  "superpages.com","whitepages.com","411.com","yellowbook.com",
+  "chamberofcommerce.com","morelocal.com","merchantcircle.com",
+  "cylex.us","n49.com","hotfrog.com","fyple.com","brownbook.net",
+  "elocal.com","showmelocal.com","citysquares.com","judysbook.com",
+  "insiderpages.com","demandforce.com","servicemagic.com",
+
+  // ── Content / media / blog platforms ───────────────────────────────────
+  "medium.com","substack.com","ghost.io","wordpress.com","blogspot.com",
+  "blogger.com","typepad.com","weebly.com","wix.com","hubpages.com",
+  "quora.com","wikipedia.org","wikimedia.org","archive.org",
+  "web.archive.org","internetarchive.org","waybackmachine.org",
+  "thoughtcatalog.com","buzzfeed.com","huffpost.com","vox.com",
+
+  // ── News / media companies ──────────────────────────────────────────────
+  "forbes.com","businessinsider.com","inc.com","entrepreneur.com",
+  "wsj.com","nytimes.com","washingtonpost.com","usatoday.com",
+  "reuters.com","apnews.com","bloomberg.com","cnbc.com","cnn.com",
+  "foxnews.com","nbcnews.com","abcnews.go.com","cbsnews.com",
+
+  // ── Marketing / CRM / automation tools ─────────────────────────────────
+  "mailchimp.com","constantcontact.com","klaviyo.com","sendgrid.com",
+  "hubspot.com","salesforce.com","marketo.com","pardot.com",
+  "activecampaign.com","drip.com","convertkit.com","aweber.com",
+  "getresponse.com","campaign-archive.com","list-manage.com",
+  "mailerlite.com","moosend.com","omnisend.com","sendinblue.com",
+  "brevo.com","elasticemail.com","pepipost.com","mailgun.com",
+  "postmarkapp.com","sparkpost.com","mandrill.com",
+
+  // ── Chatbot / widget / live chat tools ─────────────────────────────────
+  "origami.chat","origamiagents.com","drift.com","intercom.com",
+  "crisp.chat","tidio.com","tawk.to","livechat.com","olark.com",
+  "zendesk.com","freshdesk.com","helpscout.com","gorgias.com",
+  "re.amaze.com","kayako.com","happyfox.com","zopim.com",
+
+  // ── Cloud / CDN / infrastructure ───────────────────────────────────────
+  "amazonaws.com","cloudfront.net","s3.amazonaws.com",
+  "blob.core.windows.net","azurewebsites.net","azure.com",
+  "googleusercontent.com","googleapis.com","appspot.com",
+  "nccdn.net","ymaws.com","sites.google.com","sharepoint.com",
+  "onmicrosoft.com","office365.com","livemail.com",
+  "rymaps.xyz","godaddysites.com","myftpupload.com",
+  "websitepro.hosting","squarespace.com","webnode.com",
+
+  // ── eCommerce / marketplaces ────────────────────────────────────────────
+  "amazon.com","ebay.com","etsy.com","shopify.com","bigcommerce.com",
+  "woocommerce.com","walmart.com","target.com","bestbuy.com",
+  "wayfair.com","overstock.com","alibaba.com","aliexpress.com",
+  "indiamart.com","flipkart.com","rakuten.com",
+
+  // ── Insurance aggregators ───────────────────────────────────────────────
+  "americanquotes.com","americanhomequotes.com","insurancequotes.com",
+  "ehealthinsurance.com","policygenius.com","gabi.com",
+  "thegeneral.com","progressive.com","allstate.com","statefarm.com",
+  "nationwide.com","libertymutual.com","travelers.com",
+
+  // ── HR / payroll ────────────────────────────────────────────────────────
+  "adp.com","paychex.com","paylocity.com","kronos.com","ceridian.com",
+  "sap.com","workday.com","ultipro.com","namely.com","trinethr.com",
+
+  // ── Review management / reputation ─────────────────────────────────────
+  "trustpilot.com","g2.com","capterra.com","softwareadvice.com",
+  "getapp.com","producthunt.com","crozdesk.com","sourceforge.net",
+
+  // ── Misc irrelevant ─────────────────────────────────────────────────────
+  "dirxion.com","parishesonline.com","bullberry.com","aeroleads.com",
+  "fliphtml5.com","wolterskluwer.com","lemon8-app.com","sittercity.com",
+  "care.com","rover.com","dogvacay.com","wag.com","petbacker.com",
+  "banfield.com","chewy.com","petco.com","petsmart.com","petparadise.com",
+  "thrivepetcare.com","vcahospitals.com","bluepearlvet.com",
+  "carecredit.com","aspcapetinsurance.com","vippetcare.com",
+  "homeadvisor.com","servicemagic.com","porch.com","fixr.com",
+  "networx.com","improvenet.com","remodelingexpense.com",
+  "controller.com","helphouse.com","targetnxt.com","useworkhero.com",
+  "zeffy.com","latofonts.com","indiantypefoundry.com",
+  "veooz.com","thevetrecruiter.com","petdesk.com","evetsites.com",
+  "seniorsbluebook.com","alumni.com","alumniinsuranceprogram.com",
+  "theaip.com","talkbusiness.net","arkansasedc.com","wbrc.com",
 ]);
 
 const REJECT_LOCALS = new Set([
@@ -51,12 +190,6 @@ const ACCEPT_LOCALS = new Set([
 ]);
 
 const NAMED_PERSON_RE = /^[a-z]{1,3}\.?[a-z]{2,20}(\.[a-z]{2,20})?$/;
-
-function domainMatches(email, sourceUrl) {
-  const emailRoot = rootDomain(email.split("@")[1] || "");
-  const pageRoot  = rootDomain(sourceUrl);
-  return emailRoot === pageRoot || pageRoot.includes(emailRoot) || emailRoot.includes(pageRoot);
-}
 
 function rootDomain(input) {
   try {
